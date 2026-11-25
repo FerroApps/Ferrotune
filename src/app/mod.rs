@@ -328,6 +328,8 @@ fn session_options(
 pub fn engine_kind(mock: bool, s: &config::Settings) -> EngineKind {
     if mock {
         EngineKind::Mock
+    } else if s.engine == config::AudioEngine::Native {
+        EngineKind::Native(s.bitrate.into(), s.normalisation)
     } else {
         EngineKind::Librespot(
             s.bitrate.into(),

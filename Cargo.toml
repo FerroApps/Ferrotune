@@ -37,6 +37,15 @@ protobuf = "3.7"
 tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect"] }
 flate2 = "1"
 httpdate = "1"
+# Already in the tree via librespot; the native engine needs Method::GET.
+http = "1"
+# Native engine: direct audio output (same crate librespot uses via rodio-backend).
+rodio = { version = "0.17", default-features = false, features = ["vorbis"] }
+# Native engine: AES-128-CTR decryption for Spotify audio files.
+aes = "0.8"
+ctr = "0.9"
+# Native engine: HLS playlist parsing for sneaktables endpoint.
+m3u8-rs = "6"
 # Strict version compare for the updater (already in the tree via other crates).
 semver = "1"
 

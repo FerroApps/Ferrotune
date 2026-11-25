@@ -14,6 +14,7 @@ pub mod connect_ctl;
 pub mod images;
 pub mod model;
 pub mod mpris;
+pub mod native;
 pub mod paging;
 pub mod pathfinder;
 pub mod playback;

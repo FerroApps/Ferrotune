@@ -365,7 +365,7 @@ impl App {
             return Task::none();
         }
         self.settings.engine = engine;
-        if engine == AudioEngine::Builtin {
+        if engine == AudioEngine::Builtin || engine == AudioEngine::Native {
             if let Some(h) = self.soloist.handle.take() {
                 h.send(Control::Shutdown);
             }

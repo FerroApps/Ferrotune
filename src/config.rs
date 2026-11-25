@@ -82,6 +82,10 @@ pub enum AudioEngine {
     /// Spotify Soloist, Spotify's official headless player (a separate
     /// process, downloaded from Spotify on first use).
     Soloist,
+    /// Native engine: HTTP-based audio delivery (storage-resolve v2 / HLS),
+    /// bypassing librespot's AP audio-key channel. Works on accounts where
+    /// Spotify denies audio keys.
+    Native,
 }
 
 /// Values that may be set in `config.json`. All optional.
