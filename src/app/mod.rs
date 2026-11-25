@@ -1730,7 +1730,13 @@ impl App {
                 self.reload_on_play = true;
                 let message = if reason.is_key_denied() {
                     self.local_denied = true;
-                    // Spotify's own player can play here: offer it.
+                    if self.settings.engine == config::AudioEngine::Builtin {
+                        // Auto-switch to the Native engine which bypasses
+                        // the AP audio-key channel.
+                        self.reload_on_play = true;
+                        self.show_toast("Audio key denied. Switching to native playback\u{2026}");
+                        return self.switch_engine(config::AudioEngine::Native);
+                    }
                     if !self.soloist_enabled() {
                         self.soloist.card = true;
                     }
@@ -3565,6 +3571,9 @@ mod tests {
         use crate::net::connect_ctl::{ClusterState, DeviceKind, RemoteDevice};
         let (mut app, mut rx, tracks) = real_app_playing();
         app.session = Some(fake_session());
+        // Start on Native so the auto-switch from Builtin doesn't fire;
+        // this tests the fallback when Native itself fails.
+        app.settings.engine = config::AudioEngine::Native;
         let _ = app.update(ui(Ui::PlayFrom(
             TrackSource::Playlist("pl01".into()),
             Some(0),
@@ -4239,6 +4248,8 @@ mod tests {
         use crate::net::audio_diag::UnavailableReason as R;
         let (mut app, _rx, _tracks) = real_app_playing();
         app.session = Some(fake_session());
+        // Start on Native so the auto-switch from Builtin doesn't fire.
+        app.settings.engine = config::AudioEngine::Native;
         let _ = app.update(ui(Ui::PlayFrom(
             TrackSource::Playlist("pl01".into()),
             Some(0),
@@ -4252,7 +4263,7 @@ mod tests {
         let _ = app.update(s(crate::auth::secrets::Secret::new("bad key")));
         let _ = app.update(ui(Ui::Soloist(soloist::SoloistUi::SaveKey)));
         assert!(app.toast.as_ref().unwrap().0.contains("API key"));
-        assert_eq!(app.settings.engine, config::AudioEngine::Builtin);
+        assert_eq!(app.settings.engine, config::AudioEngine::Native);
         // Saved: Soloist becomes the engine and the session is rebuilt.
         feed(
             &mut app,
