@@ -85,6 +85,12 @@ pub async fn load_track(
     // 4. Download the full file from CDN.
     let raw = download(session, &cdn_url).await?;
 
+    tracing::debug!(
+        len = raw.len(),
+        first_bytes = %format_args!("{:02x?}", &raw[..raw.len().min(32)]),
+        "native: downloaded audio file"
+    );
+
     // 5. If the file is DRM-encrypted, use PlayPlay to decrypt it.
     let bytes = if playplay::is_encrypted(&raw) {
         tracing::info!("native: file is encrypted, using PlayPlay to decrypt");

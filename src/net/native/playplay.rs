@@ -189,15 +189,21 @@ pub fn decrypt_audio(key: &[u8; 16], data: &mut [u8]) {
     cipher.apply_keystream(data);
 }
 
-/// Returns `true` when the downloaded file looks encrypted (0xa7 header
-/// without an immediately following OGG/MP3/FLAC magic).
+/// Returns `true` when the downloaded file looks encrypted rather than
+/// being a recognisable audio container (OGG, FLAC, MP3).
 pub fn is_encrypted(data: &[u8]) -> bool {
-    if data.first() == Some(&0xa7) {
-        return !data
-            .get(..8)
-            .is_some_and(|h| h.windows(4).any(|w| w == b"OggS" || w == b"fLaC"));
+    if data.len() < 4 {
+        return false;
     }
-    false
+    if data.starts_with(b"OggS") || data.starts_with(b"fLaC") {
+        return false;
+    }
+    // MP3 frame sync or ID3v2 tag
+    if data.starts_with(b"ID3") || (data[0] == 0xFF && data[1] & 0xE0 == 0xE0) {
+        return false;
+    }
+    // Anything else (including the common 0xa7 Spotify header) is encrypted.
+    true
 }
 
 /// Full PlayPlay pipeline: request key, deobfuscate, decrypt, strip header.

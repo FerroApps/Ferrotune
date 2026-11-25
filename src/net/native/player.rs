@@ -96,20 +96,22 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<Cmd>) {
     }
 }
 
-/// Strip Spotify's 0xa7-prefixed header. If 0xa7 is present but no
-/// `OggS` magic follows, the file is encrypted (needs an audio key)
-/// and cannot be decoded without decryption.
+/// Strip Spotify's header bytes and find the start of a known audio
+/// container. Returns an error when the data doesn't contain any
+/// recognised format (still encrypted or corrupt).
 fn strip_header(data: &[u8]) -> Result<&[u8], &'static str> {
-    if data.first() == Some(&0xa7) {
-        if let Some(pos) = data.windows(4).position(|w| w == b"OggS") {
-            return Ok(&data[pos..]);
-        }
-        return Err("audio file is DRM-encrypted (needs an audio key)");
-    }
-    if data.starts_with(b"OggS") {
+    if data.starts_with(b"OggS") || data.starts_with(b"fLaC") || data.starts_with(b"ID3") {
         return Ok(data);
     }
-    Ok(data)
+    // MP3 frame sync (0xFFEx)
+    if data.len() >= 2 && data[0] == 0xFF && data[1] & 0xE0 == 0xE0 {
+        return Ok(data);
+    }
+    // Look for OGG magic anywhere (Spotify prefixes a header before OggS).
+    if let Some(pos) = data.windows(4).position(|w| w == b"OggS") {
+        return Ok(&data[pos..]);
+    }
+    Err("audio file is DRM-encrypted (needs an audio key)")
 }
 
 /// Handle to the audio-output thread. This is `Send` + `Sync`.
