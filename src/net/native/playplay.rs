@@ -69,9 +69,15 @@ pub async fn request_obfuscated_key(
     body.push(0x28);
     body.push(0x01);
 
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("application/x-protobuf"),
+    );
+
     let raw = session
         .spclient()
-        .request(&http::Method::POST, &endpoint, None, Some(&body))
+        .request(&http::Method::POST, &endpoint, Some(headers), Some(&body))
         .await?;
 
     parse_obfuscated_key(&raw)
