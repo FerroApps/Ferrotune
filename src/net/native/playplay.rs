@@ -136,22 +136,19 @@ fn helper_path() -> PathBuf {
     base.join("ferrotune").join("playplay-helper")
 }
 
-/// Download the helper binary from `FERRO_PLAYPLAY_URL` if it's not cached.
-/// Optional `FERRO_PLAYPLAY_SHA256` verifies integrity after download.
+const HELPER_URL: &str =
+    "https://git.zenvairo.es/dasemu/unplayplay/releases/latest/download/unplayplay-main-linux-x64";
+
+/// Download the helper binary if it's not cached.  Uses `FERRO_PLAYPLAY_URL`
+/// when set, otherwise the built-in default.  Optional `FERRO_PLAYPLAY_SHA256`
+/// verifies integrity after download.
 async fn ensure_helper() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
     let path = helper_path();
     if path.exists() {
         return Ok(path);
     }
 
-    let url = std::env::var("FERRO_PLAYPLAY_URL").map_err(|_| {
-        format!(
-            "PlayPlay helper not found at {} and FERRO_PLAYPLAY_URL is not set. \
-             Set FERRO_PLAYPLAY_URL to a download URL for an unplayplay-compatible binary, \
-             or place one at that path manually.",
-            path.display()
-        )
-    })?;
+    let url = std::env::var("FERRO_PLAYPLAY_URL").unwrap_or_else(|_| HELPER_URL.to_owned());
 
     tracing::info!(url = %url, dest = %path.display(), "playplay: downloading helper");
 
