@@ -10,8 +10,8 @@ use std::time::Instant;
 
 use tokio::sync::oneshot;
 
-use super::resolve::AudioData;
 use super::super::playback::PlaybackEvent;
+use super::resolve::AudioData;
 
 enum Cmd {
     Load {
@@ -51,22 +51,20 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<Cmd>) {
 
                 let cursor = Cursor::new(data);
                 match rodio::Decoder::new(cursor) {
-                    Ok(source) => {
-                        match Sink::try_new(&handle) {
-                            Ok(s) => {
-                                s.set_volume(volume);
-                                s.append(source);
-                                if !start {
-                                    s.pause();
-                                }
-                                sink = Some(s);
-                                let _ = reply.send(Ok(()));
+                    Ok(source) => match Sink::try_new(&handle) {
+                        Ok(s) => {
+                            s.set_volume(volume);
+                            s.append(source);
+                            if !start {
+                                s.pause();
                             }
-                            Err(e) => {
-                                let _ = reply.send(Err(format!("sink: {e}")));
-                            }
+                            sink = Some(s);
+                            let _ = reply.send(Ok(()));
                         }
-                    }
+                        Err(e) => {
+                            let _ = reply.send(Err(format!("sink: {e}")));
+                        }
+                    },
                     Err(e) => {
                         let _ = reply.send(Err(format!("decode: {e}")));
                     }

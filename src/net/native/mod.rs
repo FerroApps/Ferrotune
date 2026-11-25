@@ -11,9 +11,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use super::playback::{
-    BitrateKey, PlaybackCommand, PlaybackEvent, RemoteCommand, RemoteEvent,
-};
+use super::playback::{BitrateKey, PlaybackCommand, PlaybackEvent, RemoteCommand, RemoteEvent};
 use super::session::ConnectDevice;
 use player::NativePlayer;
 
@@ -90,7 +88,9 @@ pub async fn run(
         };
         match cmd {
             PlaybackCommand::Attach(new_session) => {
-                if let Some(o) = observer.take() { o.abort(); }
+                if let Some(o) = observer.take() {
+                    o.abort();
+                }
                 if new_session.dealer {
                     let s = new_session.session.clone();
                     let own = s.device_id().to_owned();
@@ -111,16 +111,17 @@ pub async fn run(
                     match NativePlayer::new() {
                         Ok(p) => player = Some(p),
                         Err(e) => {
-                            let _ = ev_tx.send(PlaybackEvent::Error(
-                                format!("native audio init: {e}"),
-                            ));
+                            let _ =
+                                ev_tx.send(PlaybackEvent::Error(format!("native audio init: {e}")));
                         }
                     }
                 }
             }
             PlaybackCommand::SetVolume(v) => {
                 pending_volume = v.clamp(0.0, 1.0);
-                if let Some(p) = &player { p.set_volume(pending_volume); }
+                if let Some(p) = &player {
+                    p.set_volume(pending_volume);
+                }
             }
             PlaybackCommand::RefreshDevices => refresh.notify_one(),
             PlaybackCommand::Remote(rc) => {
@@ -148,9 +149,7 @@ pub async fn run(
                     remote_active = false;
                 }
                 let Some(sess) = &session else {
-                    let _ = ev_tx.send(PlaybackEvent::Error(
-                        "native: not connected yet".into(),
-                    ));
+                    let _ = ev_tx.send(PlaybackEvent::Error("native: not connected yet".into()));
                     continue;
                 };
                 let Some(p) = &mut player else {
@@ -161,7 +160,10 @@ pub async fn run(
                 };
                 match other {
                     PlaybackCommand::Load {
-                        uri, start, position_ms, ..
+                        uri,
+                        start,
+                        position_ms,
+                        ..
                     } => {
                         let _ = ev_tx.send(PlaybackEvent::Loading { uri: uri.clone() });
                         let sess = sess.clone();

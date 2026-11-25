@@ -104,12 +104,7 @@ async fn resolve_cdn(
     let v2_endpoint = format!("/storage-resolve/v2/files/audio/interactive/{hex}");
     let response = session
         .spclient()
-        .request(
-            &http::Method::GET,
-            &v2_endpoint,
-            None,
-            None,
-        )
+        .request(&http::Method::GET, &v2_endpoint, None, None)
         .await;
 
     let raw = match response {
