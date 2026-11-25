@@ -73,3 +73,11 @@ ubuntu-22.04, and creates GitHub Release `v<Cargo version>` with `ferrotune-v<ve
   `--cache-size` (Soloist's default cache is unlimited).
   With `engine = soloist`, no Spirc and no local librespot player: the
   Connect controller opens its own dealer (`SessionOptions::controller`).
+- In-app updater (`src/update/`, glue `app/updates.rs`, views `ui/update.rs`):
+  repo `FerroApps/Ferrotune`. Only an install.sh install (marker
+  `installed-version`) self-updates; cargo installs get the command, anything
+  else the release page. Never write outside the install.sh paths, keep the
+  file list in step with `install.sh`/`release.yml` (`update::BINARIES`),
+  and never run timed checks in mock/screenshot/debug builds. Releases are
+  checksum-verified only (no signature yet). Test with
+  `FERRO_RELEASE_API=http://127.0.0.1:<port>/...` (loopback http only).

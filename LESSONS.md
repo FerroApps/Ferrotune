@@ -2,6 +2,14 @@
 
 Things learned while building Ferrotune. Add new entries at the top.
 
+- **Self-update = install.sh in Rust, nothing more.** Detect the install
+  from the canonical `current_exe()` plus install.sh's own marker
+  (`installed-version`); only then replace files, and only the ones
+  install.sh writes. Stage next to the target and rename (running ELFs keep
+  their inode), keep hard-link backups until every rename succeeded. A
+  restart must remove the single-instance socket first, or the new process
+  finds the old one and exits as a "second launch".
+
 - **When the key path is closed, use the official player.** Spotify Soloist
   decrypts audio itself and is driven over a local WebSocket, so Ferrotune
   stays a controller with one Connect device ("Ferrotune on <host>").

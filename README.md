@@ -27,17 +27,17 @@ Premium accounts.
 ## Install / update
 
 Linux x86_64, no root needed. One command installs and updates (it downloads
-the latest [release](https://github.com/Dasemu/Ferrotune/releases/latest), checks
+the latest [release](https://github.com/FerroApps/Ferrotune/releases/latest), checks
 its SHA-256 and puts the binary, menu entry and icon under `~/.local`):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Dasemu/Ferrotune/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/FerroApps/Ferrotune/main/install.sh | sh
 ```
 
 Uninstall (removes only what the installer added, never your account data):
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Dasemu/Ferrotune/main/install.sh | sh -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/FerroApps/Ferrotune/main/install.sh | sh -s -- --uninstall
 ```
 
 Manual alternative: download `ferrotune-vX.Y.Z-linux-x86_64.tar.gz` and its
@@ -51,6 +51,15 @@ tar xzf ferrotune-*-linux-x86_64.tar.gz
 
 The tarball also has `packaging/dev.ferro.ferrotune.desktop` and `.svg` if you want
 a menu entry. Releases are built on Ubuntu 22.04 (glibc 2.35).
+
+**In-app updates.** Ferrotune looks for a new release shortly after it starts
+and every 6 hours (Settings → Updates → "Check for updates automatically").
+A slim bar offers it; [x] hides that version. An `install.sh` install updates
+itself (download, SHA-256 check, atomic replace, then "Restart now"). A
+`cargo install` copy shows the command to run instead, and any other install
+(system package, Flatpak, AppImage, a source build) just links to the release
+page. The check sends only `User-Agent: ferrotune/<version>` to GitHub.
+Releases are verified by checksum but not signed yet.
 
 ## Features
 
