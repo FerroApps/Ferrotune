@@ -7,6 +7,7 @@ use librespot_metadata::audio::AudioFileFormat;
 use librespot_metadata::{Metadata, Track};
 
 use super::super::playback::BitrateKey;
+use super::playplay;
 
 /// Raw audio bytes ready for decoding + the format they are in.
 pub struct AudioData {
@@ -82,7 +83,15 @@ pub async fn load_track(
     let cdn_url = resolve_cdn(session, &file_id).await?;
 
     // 4. Download the full file from CDN.
-    let bytes = download(session, &cdn_url).await?;
+    let raw = download(session, &cdn_url).await?;
+
+    // 5. If the file is DRM-encrypted, use PlayPlay to decrypt it.
+    let bytes = if playplay::is_encrypted(&raw) {
+        tracing::info!("native: file is encrypted, using PlayPlay to decrypt");
+        playplay::decrypt_file(session, &file_id, &raw).await?
+    } else {
+        raw
+    };
 
     Ok(AudioData { bytes, format })
 }

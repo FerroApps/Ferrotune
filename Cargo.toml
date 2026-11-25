@@ -44,6 +44,7 @@ rodio = { version = "0.17", default-features = false, features = ["vorbis"] }
 # Native engine: AES-128-CTR decryption for Spotify audio files.
 aes = "0.8"
 ctr = "0.9"
+cipher = "0.4"
 # Native engine: HLS playlist parsing for sneaktables endpoint.
 m3u8-rs = "6"
 # Strict version compare for the updater (already in the tree via other crates).

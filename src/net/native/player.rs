@@ -96,14 +96,20 @@ fn audio_thread(rx: std::sync::mpsc::Receiver<Cmd>) {
     }
 }
 
-/// Strip Spotify's 0xa7-prefixed header from encrypted OGG files.
-fn skip_spotify_header(data: &[u8]) -> &[u8] {
-    if data.first() == Some(&0xa7)
-        && let Some(pos) = data.windows(4).position(|w| w == b"OggS")
-    {
-        return &data[pos..];
+/// Strip Spotify's 0xa7-prefixed header. If 0xa7 is present but no
+/// `OggS` magic follows, the file is encrypted (needs an audio key)
+/// and cannot be decoded without decryption.
+fn strip_header(data: &[u8]) -> Result<&[u8], &'static str> {
+    if data.first() == Some(&0xa7) {
+        if let Some(pos) = data.windows(4).position(|w| w == b"OggS") {
+            return Ok(&data[pos..]);
+        }
+        return Err("audio file is DRM-encrypted (needs an audio key)");
     }
-    data
+    if data.starts_with(b"OggS") {
+        return Ok(data);
+    }
+    Ok(data)
 }
 
 /// Handle to the audio-output thread. This is `Send` + `Sync`.
@@ -142,7 +148,7 @@ impl NativePlayer {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.playing_since = None;
 
-        let data = skip_spotify_header(&audio.bytes).to_vec();
+        let data = strip_header(&audio.bytes)?.to_vec();
         let (reply_tx, reply_rx) = oneshot::channel();
 
         self.tx

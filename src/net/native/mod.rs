@@ -4,6 +4,7 @@
 //! (librespot issue #1649).
 
 mod player;
+pub(crate) mod playplay;
 mod resolve;
 
 use std::sync::Arc;
@@ -183,11 +184,17 @@ pub async fn run(
                                         let _ = ev_tx.send(ev);
                                     }
                                     Err(e) => {
-                                        tracing::warn!(error = %e, "native: decode failed");
-                                        let _ = ev_tx.send(PlaybackEvent::Unavailable {
-                                            uri,
-                                            reason: super::audio_diag::UnavailableReason::Fetch,
-                                        });
+                                        let msg = e.to_string();
+                                        tracing::warn!(error = %msg, "native: decode failed");
+                                        let reason = if msg.contains("DRM-encrypted") {
+                                            super::audio_diag::UnavailableReason::AudioKeyDenied {
+                                                code: 1,
+                                            }
+                                        } else {
+                                            super::audio_diag::UnavailableReason::Fetch
+                                        };
+                                        let _ =
+                                            ev_tx.send(PlaybackEvent::Unavailable { uri, reason });
                                     }
                                 }
                             }
