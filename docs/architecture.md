@@ -261,6 +261,7 @@ protobuf, pathfinder GraphQL, over `reqwest`). The public Web API is not used.
 | `store/` | `mod.rs`, `schema.sql` (`entity` JSON blobs by kind/id, `kv` settings), `schema_v2.sql` (`http_cache`) |
 | `auth/` | `mod.rs` (AuthState: silent login → browser fallback), `oauth.rs` (PKCE, loopback listener, code exchange), `secrets.rs` |
 | `tray/` | `model.rs` (tray state + `Command`, pure), `sni.rs` (StatusNotifierItem via `ksni`, Linux), `stub.rs` (other OSes: no tray, not implemented), `icon.rs` (app SVG to ARGB pixmaps), `instance.rs` (single-instance Unix socket), `autostart.rs` (XDG autostart entry) |
+| `update/` | in-app updater, no iced: `release.rs` (GitHub latest release, ETag, asset choice), `version.rs` (semver), `method.rs` (install-method detection, pure), `download.rs` (GitHub-only HTTPS, caps, SHA-256), `extract.rs` (safe tar.gz), `install.rs` (atomic swap + rollback), `schedule.rs`, `state.rs` (`update.json`), `restart.rs`; app glue `app/updates.rs`, views `ui/update.rs` |
 | other | `desktop.rs` (.desktop entry + icon installer) |
 
 **Tray and background mode.** The app is an `iced::daemon`. Closing the
@@ -277,10 +278,60 @@ asks the running instance (socket in `$XDG_RUNTIME_DIR`) to show its window.
 Settings: close to tray and start minimized live in `config.json`; "open at
 login" is the existence of `~/.config/autostart/dev.ferro.ferrotune.desktop`.
 
+**Updates.** `GET https://api.github.com/repos/FerroApps/Ferrotune/releases/latest`
+(`Accept: application/vnd.github+json`, `User-Agent: ferrotune/<version>`,
+`If-None-Match` with the stored ETag; no account data, no IDs). Timed checks
+run 10-20 s after start and then every 6 h ± 30 min, also while hidden in the
+tray (`Subscription::run(ticks)`, dropped when "Check for updates
+automatically" is off); never in `--mock`, `--screenshot` or debug builds
+unless `FERRO_UPDATE_FORCE=1`. 403/429 back off silently (`Retry-After` /
+`x-ratelimit-reset`, clamped). `FERRO_RELEASE_API` replaces the full
+"latest release" URL, as in `install.sh`, but only `https://` or loopback
+`http://` (tests). Strict semver against `CARGO_PKG_VERSION`; drafts and
+prereleases are ignored. The banner sits above the top bar: "Ferrotune X is
+available" [Update] [Release notes] [x]; [x] stores the version in
+`$XDG_STATE_HOME/ferrotune/update.json` (with the ETag and its release) and a
+newer version shows again. Settings → Updates: version, check button and
+result, update / restart button, release notes, the auto-check toggle and the
+detected install method.
+
+Install methods (`update::method::detect`, pure, fed the canonical
+`current_exe()` plus env markers):
+
+| Method | Detected by | Update does |
+|---|---|---|
+| install.sh | exe = `${XDG_BIN_HOME:-~/.local/bin}/ferrotune` and `${XDG_DATA_HOME:-~/.local/share}/ferrotune/installed-version` exists, bin dir writable | self-update |
+| cargo install | exe in `${CARGO_HOME:-~/.cargo}/bin` | banner shows `cargo install --git https://github.com/FerroApps/Ferrotune --locked --force` + copy button |
+| other | system path, Flatpak (`FLATPAK_ID`), AppImage (`APPIMAGE`/`APPDIR`), a cargo `target/` dir, read-only install.sh dir, non-Linux-x86_64 | open the release page only |
+
+Self-update (`update::install`): the `.sha256` and the tarball are streamed
+into `.ferrotune-update.<pid>/` inside the bin dir (same file system), the
+SHA-256 is checked (mismatch: abort, nothing touched), the tarball is
+extracted by a reader that refuses absolute paths, `..`, symlinks, hardlinks,
+special files, pax headers and more than one top directory (caps: 300 MB
+download, 400 MB unpacked). Then the binary, desktop entry (`Exec=` rewritten
+exactly like `install.sh`), icon and `installed-version` are staged as
+`.<name>.new.<pid>` and renamed over their targets; the old files are kept as
+hard links until every rename succeeded and are put back on failure. The
+desktop caches are refreshed like `install.sh` on a background thread.
+Downloads only go to `api.github.com`, `github.com`,
+`objects.githubusercontent.com` and `release-assets.githubusercontent.com`
+over HTTPS (redirects included); logged URLs drop their signed query. The
+download is a cancellable `Task::run` stream; the swap runs in
+`spawn_blocking`. "Restart now" removes the single-instance socket
+(`tray::instance::release`), spawns the new binary with the same args (plus
+`--minimized` when hidden) and quits through `App::quit`.
+
+Integrity: the checksum is published by the same release, so it only proves
+the download is intact, not who built it. Releases are not signed yet.
+Proposal: sign the tarball in `release.yml` with minisign (or cosign
+keyless) and embed the public key in the binary; this needs a signing-key
+repository secret that the maintainer has to add first.
+
 **Long-lived subscriptions.** Playback engine events
 (`Subscription::run_with(EngineKind, ..)`), MPRIS commands (Linux), a 500 ms
 tick only while playing or a toast is visible (and the window is shown), the
-tray (`tray::events`) and single-instance "show" requests.
+tray (`tray::events`), single-instance "show" requests and the update timer.
 
 **Screens and navigation.**
 

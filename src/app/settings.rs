@@ -18,6 +18,8 @@ pub enum SettingChange {
     Theme(ThemeChoice),
     CloseToTray(bool),
     StartMinimized(bool),
+    /// "Check for updates automatically".
+    AutoUpdateCheck(bool),
     /// Writes or removes the XDG autostart entry (not stored in config.json).
     Autostart(bool),
     /// Typing in the device name field (saved on commit).
@@ -66,6 +68,7 @@ pub fn apply(s: &mut Settings, c: &SettingChange) -> Effects {
         SettingChange::Theme(t) => s.theme = *t,
         SettingChange::CloseToTray(on) => s.close_to_tray = *on,
         SettingChange::StartMinimized(on) => s.start_minimized = *on,
+        SettingChange::AutoUpdateCheck(on) => s.auto_update_check = *on,
         SettingChange::Autostart(_) => e.save = false,
         SettingChange::DeviceName(n) => {
             s.device_name = n
@@ -198,6 +201,8 @@ mod tests {
         assert!(e.save && !e.restart_engine && !s.close_to_tray);
         assert!(apply(&mut s, &SettingChange::StartMinimized(true)).save);
         assert!(s.start_minimized);
+        assert!(apply(&mut s, &SettingChange::AutoUpdateCheck(false)).save);
+        assert!(!s.auto_update_check);
         // The autostart file is the source of truth, not config.json.
         assert!(!apply(&mut s, &SettingChange::Autostart(true)).save);
     }

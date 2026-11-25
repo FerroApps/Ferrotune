@@ -175,6 +175,7 @@ pub fn view(app: &App) -> El<'_> {
             ),
         ],
     );
+    let updates = section("Updates", super::update::settings_rows(app, setting_row));
     let size = app
         .cache_bytes
         .map(format_bytes)
@@ -221,6 +222,7 @@ pub fn view(app: &App) -> El<'_> {
             connect,
             display,
             window,
+            updates,
             storage,
             account,
         ]

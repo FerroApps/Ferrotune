@@ -120,7 +120,7 @@ pub fn extract_binary<R: Read, W: Write>(
 }
 
 /// A short read is either the cap (the `Take` ran out) or truncation.
-fn unpacked_error<R>(tar: &io::Take<R>) -> ArchiveError {
+pub(crate) fn unpacked_error<R>(tar: &io::Take<R>) -> ArchiveError {
     if tar.limit() == 0 {
         ArchiveError::TooLarge
     } else {
@@ -128,7 +128,10 @@ fn unpacked_error<R>(tar: &io::Take<R>) -> ArchiveError {
     }
 }
 
-fn read_exact_or_corrupt<R: Read>(r: &mut io::Take<R>, buf: &mut [u8]) -> Result<(), ArchiveError> {
+pub(crate) fn read_exact_or_corrupt<R: Read>(
+    r: &mut io::Take<R>,
+    buf: &mut [u8],
+) -> Result<(), ArchiveError> {
     match r.read_exact(buf) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Err(unpacked_error(r)),
@@ -137,7 +140,10 @@ fn read_exact_or_corrupt<R: Read>(r: &mut io::Take<R>, buf: &mut [u8]) -> Result
 }
 
 /// Read one 512-byte block; `false` at a clean end of stream.
-fn read_block<R: Read>(r: &mut io::Take<R>, buf: &mut [u8; 512]) -> Result<bool, ArchiveError> {
+pub(crate) fn read_block<R: Read>(
+    r: &mut io::Take<R>,
+    buf: &mut [u8; 512],
+) -> Result<bool, ArchiveError> {
     let mut filled = 0;
     while filled < buf.len() {
         match r.read(&mut buf[filled..]) {
@@ -157,7 +163,7 @@ fn read_block<R: Read>(r: &mut io::Take<R>, buf: &mut [u8; 512]) -> Result<bool,
     Ok(true)
 }
 
-fn header_name(h: &[u8; 512]) -> String {
+pub(crate) fn header_name(h: &[u8; 512]) -> String {
     let field = |b: &[u8]| {
         let end = b.iter().position(|c| *c == 0).unwrap_or(b.len());
         String::from_utf8_lossy(&b[..end]).into_owned()
@@ -182,7 +188,7 @@ fn is_soloist(name: &str) -> bool {
     !parts.contains(&"..") && matches!(parts.as_slice(), ["soloist"] | [_, "soloist"])
 }
 
-fn octal(field: &[u8]) -> Option<u64> {
+pub(crate) fn octal(field: &[u8]) -> Option<u64> {
     // GNU base-256 for very large sizes: refuse (the caps are far lower).
     if field.first().is_some_and(|b| b & 0x80 != 0) {
         return None;
@@ -199,7 +205,7 @@ fn octal(field: &[u8]) -> Option<u64> {
     u64::from_str_radix(s, 8).ok()
 }
 
-fn checksum_ok(h: &[u8; 512]) -> bool {
+pub(crate) fn checksum_ok(h: &[u8; 512]) -> bool {
     let Some(want) = octal(&h[148..156]) else {
         return false;
     };
