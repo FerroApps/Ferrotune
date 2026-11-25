@@ -69,16 +69,41 @@ pub async fn request_obfuscated_key(
     body.push(0x28);
     body.push(0x01);
 
+    tracing::debug!(
+        endpoint = %endpoint,
+        body_hex = %to_hex(&body),
+        "playplay: requesting license key from spclient"
+    );
+
     let mut headers = http::HeaderMap::new();
     headers.insert(
         http::header::CONTENT_TYPE,
         http::HeaderValue::from_static("application/x-protobuf"),
     );
+    headers.insert(
+        http::header::ACCEPT,
+        http::HeaderValue::from_static("application/x-protobuf"),
+    );
 
-    let raw = session
+    let raw = match session
         .spclient()
         .request(&http::Method::POST, &endpoint, Some(headers), Some(&body))
-        .await?;
+        .await
+    {
+        Ok(bytes) => {
+            tracing::debug!(len = bytes.len(), "playplay: license response OK");
+            bytes
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                error_debug = ?e,
+                endpoint = %endpoint,
+                "playplay: license request failed"
+            );
+            return Err(e.into());
+        }
+    };
 
     parse_obfuscated_key(&raw)
 }
