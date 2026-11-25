@@ -109,6 +109,7 @@ pub struct FileConfig {
     pub close_to_tray: Option<bool>,
     /// Start with no window, only the tray icon (default false).
     pub start_minimized: Option<bool>,
+    pub auto_update_check: Option<bool>,
 }
 
 /// Preferences edited on the Settings screen. Nothing secret: they are
@@ -133,6 +134,8 @@ pub struct Settings {
     pub close_to_tray: bool,
     /// Launch with only the tray icon, no window.
     pub start_minimized: bool,
+    /// Look for new Ferrotune releases at start and every 6 hours.
+    pub auto_update_check: bool,
 }
 
 impl Default for Settings {
@@ -151,6 +154,7 @@ impl Default for Settings {
             soloist_cache_mb: crate::net::soloist::process::DEFAULT_CACHE_MB,
             close_to_tray: true,
             start_minimized: false,
+            auto_update_check: true,
         }
     }
 }
@@ -179,6 +183,7 @@ impl Settings {
             m.insert("soloist_cache_mb".into(), self.soloist_cache_mb.into());
             m.insert("close_to_tray".into(), self.close_to_tray.into());
             m.insert("start_minimized".into(), self.start_minimized.into());
+            m.insert("auto_update_check".into(), self.auto_update_check.into());
         }
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
@@ -285,6 +290,7 @@ impl Config {
                 .clamp(crate::net::soloist::process::MIN_CACHE_MB, 100_000),
             close_to_tray: file.close_to_tray.unwrap_or(true),
             start_minimized: file.start_minimized.unwrap_or(false),
+            auto_update_check: file.auto_update_check.unwrap_or(true),
         };
         let device_name = if settings.device_name.is_empty() {
             device_name(hostname().as_deref())
@@ -575,6 +581,7 @@ mod tests {
             soloist_cache_mb: 1000,
             close_to_tray: false,
             start_minimized: true,
+            auto_update_check: false,
         };
         s.save(&path).unwrap();
         let file = read_file_config(&path);

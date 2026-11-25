@@ -19,6 +19,25 @@ pub struct Primary {
     listener: Option<std::os::unix::net::UnixListener>,
 }
 
+/// The socket this process owns (removed by [`release`]).
+static OWNED_SOCKET: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Give up the lock before starting a replacement process (restart after
+/// an update): the socket file is removed, so the new process binds a fresh
+/// one instead of finding us and exiting as a "second launch".
+pub fn release() {
+    let path = OWNED_SOCKET.lock().ok().and_then(|mut g| g.take());
+    if let Some(p) = path {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
+fn remember_socket(path: &std::path::Path) {
+    if let Ok(mut g) = OWNED_SOCKET.lock() {
+        *g = Some(path.to_path_buf());
+    }
+}
+
 /// Wakes the app when a second launch asked for the window.
 static SHOW_REQUESTED: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
@@ -80,6 +99,7 @@ mod imp {
 
     fn primary(path: &Path, listener: UnixListener) -> std::io::Result<Role> {
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+        super::remember_socket(path);
         Ok(Role::Primary(Primary {
             listener: Some(listener),
         }))
@@ -168,6 +188,9 @@ mod tests {
     use std::sync::mpsc;
     use std::time::Duration;
 
+    /// `acquire_at` records the owned socket in a global: serialize.
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn socket_path_prefers_the_runtime_dir() {
         let tmp = tempfile::tempdir().unwrap();
@@ -181,6 +204,7 @@ mod tests {
 
     #[test]
     fn second_launch_asks_the_first_to_show() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("a.sock");
         let Role::Primary(first) = acquire_at(&path, true).unwrap() else {
@@ -198,7 +222,23 @@ mod tests {
     }
 
     #[test]
+    fn released_lock_lets_a_new_process_become_primary() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("r.sock");
+        let Role::Primary(first) = acquire_at(&path, true).unwrap() else {
+            panic!("first launch must be primary");
+        };
+        first.serve(|| {});
+        release();
+        assert!(!path.exists());
+        // The old listener still runs, but the restarted process owns the lock.
+        assert!(matches!(acquire_at(&path, true).unwrap(), Role::Primary(_)));
+    }
+
+    #[test]
     fn stale_socket_is_replaced() {
+        let _g = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("b.sock");
         // A crashed instance leaves the socket file behind.

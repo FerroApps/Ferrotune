@@ -19,6 +19,7 @@ pub mod sidebar;
 pub mod soloist;
 pub mod theme;
 pub mod topbar;
+pub mod update;
 pub mod widgets;
 
 use iced::widget::{column, container, row, scrollable, stack};
@@ -54,7 +55,17 @@ pub fn view(app: &App) -> Element<'_, Message> {
     } else if app.show_lyrics {
         panels = panels.push(lyrics::view(app));
     }
-    let mut body = column![topbar::view(app), panels, now_playing::view(app)].spacing(0);
+    let mut body = column![].spacing(0);
+    if let Some(b) = update::banner(app) {
+        body = body.push(container(b).padding(Padding {
+            top: 6.0,
+            ..Padding::ZERO
+        }));
+    }
+    let mut body = body
+        .push(topbar::view(app))
+        .push(panels)
+        .push(now_playing::view(app));
     if let Some(strip) = devices::playing_on(app) {
         body = body.push(container(strip).padding(Padding {
             bottom: 6.0,
