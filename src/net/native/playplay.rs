@@ -5,11 +5,15 @@
 //! The endpoint returns an *obfuscated* key that must be transformed into
 //! the actual AES key.  The deobfuscation runs in Spotify's own PlayPlay
 //! VM, so we delegate to an external helper binary (compatible with the
-//! community "unplayplay" tool).
+//! community "unplayplay" tool).  The helper is auto-downloaded from a
+//! user-configured URL (`FERRO_PLAYPLAY_URL`) on first use.
+
+use std::path::PathBuf;
 
 use aes::Aes128;
 use cipher::{KeyIvInit, StreamCipher};
 use librespot_core::{FileId, Session};
+use sha2::{Digest, Sha256};
 
 type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 
@@ -122,35 +126,86 @@ fn decode_varint(data: &[u8]) -> Result<(u64, usize), Box<dyn std::error::Error 
 }
 
 /// Resolve the helper binary path.
-fn helper_path() -> std::path::PathBuf {
+fn helper_path() -> PathBuf {
     if let Ok(p) = std::env::var("FERRO_PLAYPLAY_HELPER") {
-        return std::path::PathBuf::from(p);
+        return PathBuf::from(p);
     }
     let base = directories::BaseDirs::new()
         .map(|b| b.data_dir().to_path_buf())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+        .unwrap_or_else(|| PathBuf::from("."));
     base.join("ferrotune").join("playplay-helper")
+}
+
+/// Download the helper binary from `FERRO_PLAYPLAY_URL` if it's not cached.
+/// Optional `FERRO_PLAYPLAY_SHA256` verifies integrity after download.
+async fn ensure_helper() -> Result<PathBuf, Box<dyn std::error::Error + Send + Sync>> {
+    let path = helper_path();
+    if path.exists() {
+        return Ok(path);
+    }
+
+    let url = std::env::var("FERRO_PLAYPLAY_URL").map_err(|_| {
+        format!(
+            "PlayPlay helper not found at {} and FERRO_PLAYPLAY_URL is not set. \
+             Set FERRO_PLAYPLAY_URL to a download URL for an unplayplay-compatible binary, \
+             or place one at that path manually.",
+            path.display()
+        )
+    })?;
+
+    tracing::info!(url = %url, dest = %path.display(), "playplay: downloading helper");
+
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?;
+
+    let resp = http.get(&url).send().await?;
+    if !resp.status().is_success() {
+        return Err(format!("playplay helper download failed: HTTP {}", resp.status()).into());
+    }
+
+    let bytes = resp.bytes().await?;
+
+    if let Ok(expected_hex) = std::env::var("FERRO_PLAYPLAY_SHA256") {
+        let actual_hex = to_hex(&Sha256::digest(&bytes));
+        if !actual_hex.eq_ignore_ascii_case(&expected_hex) {
+            return Err(format!(
+                "playplay helper checksum mismatch: expected {expected_hex}, got {actual_hex}"
+            )
+            .into());
+        }
+        tracing::debug!("playplay: checksum verified");
+    }
+
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+
+    let tmp = path.with_extension("part");
+    tokio::fs::write(&tmp, &bytes).await?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    tokio::fs::rename(&tmp, &path).await?;
+    tracing::info!(path = %path.display(), "playplay: helper installed");
+    Ok(path)
 }
 
 /// Call the external deobfuscation helper to transform the obfuscated key
 /// into the actual AES key.
 ///
 /// The helper takes two hex arguments (file_id, obfuscated_key) and prints
-/// the 16-byte AES key as hex on stdout.
+/// the 16-byte AES key as hex on stdout.  If missing, it is downloaded from
+/// `FERRO_PLAYPLAY_URL`.
 pub async fn deobfuscate_key(
     file_id: &FileId,
     obfuscated_key: &[u8],
 ) -> Result<[u8; 16], Box<dyn std::error::Error + Send + Sync>> {
-    let path = helper_path();
-    if !path.exists() {
-        return Err(format!(
-            "PlayPlay helper not found at {}. \
-             Set FERRO_PLAYPLAY_HELPER or place an unplayplay-compatible \
-             binary there to enable audio decryption.",
-            path.display()
-        )
-        .into());
-    }
+    let path = ensure_helper().await?;
 
     let file_hex = file_id_hex(file_id);
     let key_hex = to_hex(obfuscated_key);
