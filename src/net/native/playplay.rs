@@ -45,14 +45,8 @@ fn file_id_hex(fid: &FileId) -> String {
     fid.to_base16().unwrap_or_default()
 }
 
-/// Request a PlayPlay license and return the obfuscated key bytes.
-pub async fn request_obfuscated_key(
-    session: &Session,
-    file_id: &FileId,
-) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
-    let hex = file_id_hex(file_id);
-    let endpoint = format!("/playplay/v1/key/{hex}");
-
+/// Build the PlayPlayLicenseRequest protobuf body.
+fn build_license_request() -> Vec<u8> {
     // Hand-coded PlayPlayLicenseRequest protobuf:
     //   field 1 (version):       tag 0x08, varint 2
     //   field 2 (token):         tag 0x12, len 16, [16 bytes]
@@ -68,44 +62,84 @@ pub async fn request_obfuscated_key(
     body.push(0x01);
     body.push(0x28);
     body.push(0x01);
+    body
+}
+
+/// Request a PlayPlay license and return the obfuscated key bytes.
+///
+/// Uses reqwest directly (bypassing librespot's spclient) so that
+/// error responses include the full body for diagnostics.
+pub async fn request_obfuscated_key(
+    session: &Session,
+    file_id: &FileId,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    let hex = file_id_hex(file_id);
+    let endpoint = format!("/playplay/v1/key/{hex}");
+
+    let body = build_license_request();
+
+    let base_url = session
+        .spclient()
+        .base_url()
+        .await
+        .map_err(|e| format!("playplay: could not resolve spclient base URL: {e}"))?;
+
+    let url = format!("{base_url}{endpoint}");
+
+    let token = session
+        .login5()
+        .auth_token()
+        .await
+        .map_err(|e| format!("playplay: could not get auth token: {e}"))?;
+
+    let client_token = session.spclient().client_token().await.ok();
 
     tracing::debug!(
-        endpoint = %endpoint,
+        url = %url,
         body_hex = %to_hex(&body),
-        "playplay: requesting license key from spclient"
+        has_client_token = client_token.is_some(),
+        "playplay: requesting license key (direct)"
     );
 
-    let mut headers = http::HeaderMap::new();
-    headers.insert(
-        http::header::CONTENT_TYPE,
-        http::HeaderValue::from_static("application/x-protobuf"),
-    );
-    headers.insert(
-        http::header::ACCEPT,
-        http::HeaderValue::from_static("application/x-protobuf"),
-    );
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
 
-    let raw = match session
-        .spclient()
-        .request(&http::Method::POST, &endpoint, Some(headers), Some(&body))
-        .await
-    {
-        Ok(bytes) => {
-            tracing::debug!(len = bytes.len(), "playplay: license response OK");
-            bytes
-        }
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                error_debug = ?e,
-                endpoint = %endpoint,
-                "playplay: license request failed"
-            );
-            return Err(e.into());
-        }
-    };
+    let mut req = http
+        .post(&url)
+        .header("Content-Type", "application/x-protobuf")
+        .header("Accept", "application/x-protobuf")
+        .header(
+            "Authorization",
+            format!("{} {}", token.token_type, token.access_token),
+        );
 
-    parse_obfuscated_key(&raw)
+    if let Some(ref ct) = client_token {
+        req = req.header("client-token", ct.as_str());
+    }
+
+    let resp = req.body(body).send().await?;
+
+    let status = resp.status();
+    let resp_headers = format!("{:?}", resp.headers());
+    let resp_body = resp.bytes().await?;
+
+    if !status.is_success() {
+        let body_text = String::from_utf8_lossy(&resp_body);
+        tracing::warn!(
+            status = %status,
+            headers = %resp_headers,
+            body_len = resp_body.len(),
+            body_text = %body_text,
+            body_hex = %to_hex(&resp_body[..resp_body.len().min(256)]),
+            url = %url,
+            "playplay: license request failed with full diagnostics"
+        );
+        return Err(format!("PlayPlay license request failed: HTTP {status} — {body_text}").into());
+    }
+
+    tracing::debug!(len = resp_body.len(), "playplay: license response OK");
+    parse_obfuscated_key(&resp_body)
 }
 
 /// Minimal protobuf parser: extract the bytes field at tag 0x0A (field 1,
