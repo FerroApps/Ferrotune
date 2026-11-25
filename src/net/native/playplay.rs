@@ -45,14 +45,32 @@ fn file_id_hex(fid: &FileId) -> String {
     fid.to_base16().unwrap_or_default()
 }
 
+fn encode_varint(mut val: u64, out: &mut Vec<u8>) {
+    loop {
+        let byte = (val & 0x7F) as u8;
+        val >>= 7;
+        if val == 0 {
+            out.push(byte);
+            return;
+        }
+        out.push(byte | 0x80);
+    }
+}
+
 /// Build the PlayPlayLicenseRequest protobuf body.
 fn build_license_request() -> Vec<u8> {
-    // Hand-coded PlayPlayLicenseRequest protobuf:
+    // PlayPlayLicenseRequest protobuf:
     //   field 1 (version):       tag 0x08, varint 2
     //   field 2 (token):         tag 0x12, len 16, [16 bytes]
     //   field 4 (interactivity): tag 0x20, varint 1  (INTERACTIVE)
     //   field 5 (content_type):  tag 0x28, varint 1  (AUDIO_TRACK)
-    let mut body = Vec::with_capacity(24);
+    //   field 6 (timestamp):     tag 0x30, varint <unix seconds>
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let mut body = Vec::with_capacity(36);
     body.push(0x08);
     body.push(0x02);
     body.push(0x12);
@@ -62,6 +80,8 @@ fn build_license_request() -> Vec<u8> {
     body.push(0x01);
     body.push(0x28);
     body.push(0x01);
+    body.push(0x30);
+    encode_varint(now, &mut body);
     body
 }
 
