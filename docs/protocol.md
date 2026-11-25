@@ -247,36 +247,6 @@ or null `data` is never cached.
   of skipping "unavailable" tracks.
 - `--mock` uses `MockEngine`, a simulated clock with the same events.
 
-### Why a track is "unavailable" (`net/audio_diag.rs`)
-
-librespot 0.8 sends `PlayerEvent::Unavailable` for every load failure and
-keeps the reason in its log. Ferrotune installs a `tracing` layer (always
-on, whatever `RUST_LOG` says) that reads librespot's own records:
-
-| librespot record | Stage | App reaction |
-|---|---|---|
-| `librespot_core::audio_key`: `error audio key 0 1` | access point refused the AES key (permanent) | stop at once, one banner, offer a Connect device |
-| `error audio key 0 2` | temporary refusal | retry the same track once |
-| `Track is unavailable: …` | region/catalogue restriction, embargo | skip |
-| `… not available in any supported format` | no Vorbis/MP3 file | skip |
-| `Unable to load audio item / encrypted file` | metadata, storage-resolve or CDN | skip |
-| `Unable to read audio file` (without a key error) | decoder | skip |
-
-At most three unavailable tracks in a row are skipped; the fourth stops
-playback with one persistent banner (no looping toast). Identical toasts
-keep their timer, so repeated events never flicker.
-
-**Audio key denial (real-account finding, v0.4.0).** Login, metadata,
-storage-resolve and the CDN download all work, but the access point answers
-every key request with code 1. This is upstream librespot issue #1649:
-Spotify is phasing out these key requests for some (mostly newer) accounts;
-librespot PR #1763 only retries code 2. The official clients use a different
-DRM key path that Ferrotune does not and will not reimplement. For those
-accounts local playback cannot work, so Ferrotune becomes a controller: the
-banner offers "Play on <device>" (the active or last used device), and with
-`local_denied` (or "Play on this computer" off) every Play goes to that
-device through connect-state.
-
 ### Spotify Connect controller (`net/connect_ctl.rs`)
 
 - The engine starts an observer per session once the dealer has a
