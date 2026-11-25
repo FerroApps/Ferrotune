@@ -382,6 +382,20 @@ pub fn setup_card(_: &Theme) -> container::Style {
     }
 }
 
+/// "Ferrotune x.y.z is available" bar at the top of the window.
+pub fn update_banner(_: &Theme) -> container::Style {
+    let p = pal();
+    container::Style {
+        background: Some(mix(p.bg_elevated, p.accent, 0.22).into()),
+        text_color: Some(p.text_primary),
+        border: Border {
+            radius: radius(6.0),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
 /// Persistent playback error banner.
 pub fn error_banner(_: &Theme) -> container::Style {
     let p = pal();

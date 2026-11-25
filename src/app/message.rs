@@ -33,6 +33,8 @@ pub enum Message {
     Done(Done),
     /// Events from the system tray service.
     Tray(crate::tray::Event),
+    /// In-app updater: timer ticks, check and install results.
+    Update(super::updates::UpdateEvent),
 }
 
 #[derive(Debug, Clone)]
@@ -107,6 +109,7 @@ pub enum Ui {
     ToggleUserMenu,
     Setting(super::settings::SettingChange),
     Soloist(super::soloist::SoloistUi),
+    Update(super::updates::UpdateUi),
     // window and tray
     /// The window's close button (or Alt+F4).
     CloseRequested,

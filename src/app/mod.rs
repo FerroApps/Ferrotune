@@ -13,6 +13,7 @@ pub mod settings;
 pub mod shortcuts;
 pub mod soloist;
 pub mod state;
+pub mod updates;
 pub mod window;
 
 use std::cell::Cell;
@@ -245,6 +246,8 @@ pub struct App {
     tray_enabled: bool,
     /// Handle to the running tray, once it registered.
     tray_control: Option<crate::tray::Control>,
+    /// In-app updater (`app/updates.rs`).
+    pub updater: updates::UpdaterState,
 }
 
 impl std::fmt::Debug for App {
@@ -647,6 +650,12 @@ impl App {
             autostart: false,
             tray_enabled,
             tray_control: None,
+            updater: updates::UpdaterState::new(crate::update::schedule::auto_allowed(
+                mock,
+                opts.screenshot.is_some(),
+                cfg!(debug_assertions),
+                crate::update::schedule::force_from_env(),
+            )),
         };
 
         let mut tasks = vec![app.run_window_action(first_window)];
@@ -669,6 +678,7 @@ impl App {
             tasks.push(app.check_keyring_and_restore());
         }
         tasks.push(app.request_images());
+        tasks.push(app.update_boot());
         (app, Task::batch(tasks))
     }
 
@@ -778,6 +788,9 @@ impl App {
         if self.drag.is_some() {
             subs.push(iced::event::listen_with(mouse_up_event));
         }
+        if let Some(s) = self.update_subscription() {
+            subs.push(s);
+        }
         // The tick only redraws the progress bar and expires toasts: not needed
         // while the window is hidden to the tray.
         if self.win.visible
@@ -800,6 +813,7 @@ impl App {
             Message::Net(Net::Soloist(e)) => self.on_soloist(e),
             Message::Done(d) => self.on_done(d),
             Message::Tray(ev) => self.on_tray(ev),
+            Message::Update(ev) => self.on_update_event(ev),
         };
         let pending = std::mem::take(&mut self.pending);
         let task = if pending.is_empty() {
@@ -2456,6 +2470,7 @@ impl App {
             }
             Ui::Setting(c) => self.change_setting(c),
             Ui::Soloist(u) => self.update_soloist_ui(u),
+            Ui::Update(u) => self.on_update_ui(u),
             Ui::DismissBanner => {
                 self.playback_block = None;
                 Task::none()
@@ -3272,6 +3287,26 @@ impl App {
                         )
                     }),
                 );
+            }
+            "update-banner" | "updates" => {
+                self.nav = Nav::new(Route::Home);
+                self.updater.screenshot_state();
+                if plan.screen == "updates" {
+                    tasks.push(self.navigate(Route::Settings));
+                    self.cache_bytes = Some(23_400_000);
+                    tasks.push(
+                        Task::perform(
+                            async { tokio::time::sleep(Duration::from_millis(1200)).await },
+                            |()| (),
+                        )
+                        .then(|()| {
+                            iced::widget::operation::snap_to(
+                                crate::ui::MAIN_SCROLL,
+                                iced::widget::scrollable::RelativeOffset { x: 0.0, y: 0.85 },
+                            )
+                        }),
+                    );
+                }
             }
             "soloist" => {
                 // First use: Spotify refused librespot's audio key.
