@@ -29,7 +29,7 @@ use super::client_token::{self, ClientToken};
 use super::dpop::{DPOP_KEYRING_KEY, DpopKey};
 use super::session::StoredCredentials;
 use super::tokens::{AccessToken, TokenSource};
-use crate::auth::secrets::{Secret, SecretStore, KEY_LIBRESPOT};
+use crate::auth::secrets::{KEY_LIBRESPOT, Secret, SecretStore};
 use crate::error::{Error, Result};
 
 /// The client version string we announce — same as the official desktop
