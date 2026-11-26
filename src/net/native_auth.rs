@@ -122,10 +122,8 @@ impl NativeAuth {
 
     async fn fetch_client_token_inner(&self) -> Result<String> {
         let mut cached = self.client_token.lock().await;
-        if let Some(ct) = cached.as_ref() {
-            if ct.is_fresh() {
-                return Ok(ct.token.clone());
-            }
+        if let Some(ct) = cached.as_ref().filter(|ct| ct.is_fresh()) {
+            return Ok(ct.token.clone());
         }
         let ct = client_token::fetch_client_token(
             &self.http,

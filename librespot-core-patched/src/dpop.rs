@@ -20,15 +20,9 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD as B64URL;
 use p256::ecdsa::signature::Signer;
 use p256::ecdsa::{SigningKey, VerifyingKey};
 use p256::elliptic_curve::rand_core::{OsRng, RngCore};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::Error;
-
-#[derive(Serialize, Deserialize)]
-struct StoredKey {
-    private_key: String,
-}
 
 /// P-256 DPoP key pair with interior mutability for the server nonce.
 pub struct DpopKey {
