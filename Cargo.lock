@@ -5946,7 +5946,9 @@ dependencies = [
 name = "spotify-protocol"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "bytes",
+ "flate2",
  "form_urlencoded",
  "futures-util",
  "hex",
@@ -5966,6 +5968,7 @@ dependencies = [
  "spotify-proto",
  "thiserror 2.0.21",
  "tokio",
+ "tokio-tungstenite",
  "tokio-util",
  "tracing",
  "url",

@@ -1,6 +1,8 @@
 pub mod ap;
 pub mod apresolve;
+pub mod audio_key;
 pub mod auth;
+pub mod channel;
 pub mod config;
 pub mod error;
 pub mod id;
@@ -9,7 +11,9 @@ pub mod packet;
 pub mod session;
 pub mod version;
 
+pub use audio_key::{AudioKey, AudioKeyManager};
 pub use auth::Credentials;
+pub use channel::{ChannelEvent, ChannelManager};
 pub use config::SessionConfig;
 pub use error::{ItemType, ProtocolError, Result};
 pub use id::{FileId, SpotifyId, SpotifyUri};

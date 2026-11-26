@@ -24,7 +24,9 @@ use crate::apresolve::{
     APRESOLVE_URL, AccessPoints, ApResolveData, SocketAddress, parse_apresolve_response,
     resolve_to_access_points,
 };
+use crate::audio_key::AudioKeyManager;
 use crate::auth::Credentials;
+use crate::channel::ChannelManager;
 use crate::config::SessionConfig;
 use crate::error::{ProtocolError, Result};
 use crate::mercury::MercuryManager;
@@ -72,7 +74,7 @@ pub trait ApTransportStream: Send + 'static {
 // ---------------------------------------------------------------------------
 
 /// Mutable session state protected by fine-grained locks.
-#[allow(dead_code)] // packet_tx placeholder for AudioKey subsystem
+#[allow(dead_code)] // packet_tx reserved for future outbound packet queue
 struct SessionInner {
     /// Sending half of the AP connection.  `None` before `connect()`.
     sender: Mutex<Option<Box<dyn ApTransportSink>>>,
@@ -113,6 +115,12 @@ struct SessionInner {
 
     /// Mercury request/response and pub/sub manager.
     mercury: MercuryManager,
+
+    /// Audio key request/response manager.
+    audio_key: AudioKeyManager,
+
+    /// Audio data channel manager.
+    channel: ChannelManager,
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +221,8 @@ impl Session {
             shutdown_tx,
             packet_tx,
             mercury: MercuryManager::new(),
+            audio_key: AudioKeyManager::new(),
+            channel: ChannelManager::new(),
         };
 
         Self {
@@ -255,6 +265,8 @@ impl Session {
         debug!("session shutdown");
         self.inner.is_valid.store(false, Ordering::Release);
         self.inner.mercury.shutdown();
+        self.inner.audio_key.shutdown();
+        self.inner.channel.shutdown();
         // Signal the dispatch task; ignore error (already shut down).
         let _ = self.inner.shutdown_tx.send(true);
     }
@@ -306,6 +318,16 @@ impl Session {
     /// Access the Mercury manager for request/response and pub/sub.
     pub fn mercury(&self) -> &MercuryManager {
         &self.inner.mercury
+    }
+
+    /// Access the audio key manager for requesting track decryption keys.
+    pub fn audio_key(&self) -> &AudioKeyManager {
+        &self.inner.audio_key
+    }
+
+    /// Access the channel manager for streaming audio data.
+    pub fn channel(&self) -> &ChannelManager {
+        &self.inner.channel
     }
 
     // -- async getters (for use from async contexts) -------------------------
@@ -484,15 +506,42 @@ async fn dispatch_packet(session: &Session, cmd: u8, data: Vec<u8>) -> Result<()
             Ok(())
         }
 
-        // Audio key responses — placeholder until AudioKey subsystem is built.
-        Some(PacketType::AesKey) | Some(PacketType::AesKeyError) => {
-            trace!(cmd = cmd, "audio key packet (not yet handled)");
+        // Audio key responses — routed to the AudioKeyManager.
+        Some(PacketType::AesKey) => {
+            trace!(cmd = cmd, len = data.len(), "audio key success packet");
+            if let Err(e) = session.audio_key().handle_aes_key(&data) {
+                debug!(error = %e, "audio key: AesKey handling error");
+            }
+            Ok(())
+        }
+        Some(PacketType::AesKeyError) => {
+            trace!(cmd = cmd, len = data.len(), "audio key error packet");
+            if let Err(e) = session.audio_key().handle_aes_key_error(&data) {
+                debug!(error = %e, "audio key: AesKeyError handling error");
+            }
             Ok(())
         }
 
-        // Stream / channel — placeholder.
-        Some(PacketType::StreamChunkRes) | Some(PacketType::ChannelError) => {
-            trace!(cmd = cmd, "channel packet (not yet handled)");
+        // Stream / channel — routed to the ChannelManager.
+        Some(PacketType::StreamChunk) => {
+            trace!(cmd = cmd, len = data.len(), "channel data packet");
+            if let Err(e) = session.channel().handle_data(&data) {
+                debug!(error = %e, "channel: data handling error");
+            }
+            Ok(())
+        }
+        Some(PacketType::StreamChunkRes) => {
+            trace!(cmd = cmd, len = data.len(), "channel header packet");
+            if let Err(e) = session.channel().handle_header(&data) {
+                debug!(error = %e, "channel: header handling error");
+            }
+            Ok(())
+        }
+        Some(PacketType::ChannelError) => {
+            trace!(cmd = cmd, len = data.len(), "channel error packet");
+            if let Err(e) = session.channel().handle_channel_error(&data) {
+                debug!(error = %e, "channel: error handling error");
+            }
             Ok(())
         }
 
