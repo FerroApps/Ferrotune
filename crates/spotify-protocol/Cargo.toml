@@ -1,0 +1,10 @@
+[package]
+name = "spotify-protocol"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Spotify wire protocol: identifiers, version constants, and core types"
+license = "MIT"
+
+[dependencies]
+thiserror = "2"
