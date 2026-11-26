@@ -22,9 +22,9 @@ const AES_IV: [u8; 16] = [
     0x72, 0xe0, 0x67, 0xfb, 0xdd, 0xcb, 0xcf, 0x77, 0xeb, 0xe8, 0xbc, 0x64, 0x3f, 0x63, 0x0d, 0x93,
 ];
 
-/// Fixed token sent in every PlayPlayLicenseRequest (version 2).
+/// Build-specific license-request marker sent in every PlayPlayLicenseRequest.
 const PLAYPLAY_TOKEN: [u8; 16] = [
-    0x01, 0xe1, 0x32, 0xca, 0xe5, 0x27, 0xbd, 0x21, 0x62, 0x0e, 0x82, 0x2f, 0x58, 0x51, 0x49, 0x32,
+    0x02, 0x19, 0x83, 0x16, 0xbe, 0xae, 0x6d, 0x4a, 0xf4, 0x35, 0x24, 0xd0, 0x2c, 0x37, 0x2b, 0x7e,
 ];
 
 fn to_hex(bytes: &[u8]) -> String {
@@ -59,12 +59,6 @@ fn encode_varint(mut val: u64, out: &mut Vec<u8>) {
 
 /// Build the PlayPlayLicenseRequest protobuf body.
 fn build_license_request() -> Vec<u8> {
-    // PlayPlayLicenseRequest protobuf:
-    //   field 1 (version):       tag 0x08, varint 2
-    //   field 2 (token):         tag 0x12, len 16, [16 bytes]
-    //   field 4 (interactivity): tag 0x20, varint 1  (INTERACTIVE)
-    //   field 5 (content_type):  tag 0x28, varint 1  (AUDIO_TRACK)
-    //   field 6 (timestamp):     tag 0x30, varint <unix seconds>
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
@@ -72,7 +66,7 @@ fn build_license_request() -> Vec<u8> {
 
     let mut body = Vec::with_capacity(36);
     body.push(0x08);
-    body.push(0x02);
+    body.push(0x05);
     body.push(0x12);
     body.push(0x10);
     body.extend_from_slice(&PLAYPLAY_TOKEN);
