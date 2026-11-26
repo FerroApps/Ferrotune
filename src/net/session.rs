@@ -196,8 +196,7 @@ fn map_connect_error(e: &librespot_core::Error, stored: bool) -> Error {
         Some(LoginFailure::BadCredentials) => {
             return Error::auth("Spotify refused the login (bad credentials). Please try again.");
         }
-        // Not revoked: the stored credentials are kept.
-        Some(LoginFailure::PremiumRequired) => return Error::auth(PREMIUM_REQUIRED),
+        Some(LoginFailure::PremiumRequired) => return Error::revoked(PREMIUM_REQUIRED),
         Some(LoginFailure::Transient) => {
             return Error::Net("Spotify could not complete the login right now".into());
         }
@@ -309,11 +308,20 @@ pub async fn connect(
         // Spirc opens the session itself after registering its listeners.
         match start_connect(session.clone(), credentials.clone(), c).await {
             Ok(d) => device = Some(Arc::new(d)),
-            // A refused login would be refused again without Connect.
-            Err(e) if classify_login_failure(&e.error.to_string()).is_some() => {
-                return Err(map_connect_error(&e, stored));
-            }
             Err(e) => {
+                let failure = classify_login_failure(&e.error.to_string());
+                // "Premium required" from Connect may just mean the AP
+                // blocks third-party Connect registrations — the plain
+                // session (no Spirc device) can still work, and the DPoP
+                // credential upgrade that runs after the first token fetch
+                // may fix it for the next session.
+                let fatal = matches!(
+                    failure,
+                    Some(LoginFailure::BadCredentials | LoginFailure::Other)
+                );
+                if fatal {
+                    return Err(map_connect_error(&e, stored));
+                }
                 tracing::warn!(error = %e, "Spotify Connect unavailable; continuing without it");
                 session.shutdown();
                 session = librespot_core::Session::new(config, None);
@@ -484,7 +492,7 @@ mod tests {
             assert!(matches!(e, Error::Net(_)), "{transient}: {e:?}");
         }
         let premium = map_connect_error(&failed("Premium account required"), true);
-        assert!(!premium.is_revoked());
+        assert!(premium.is_revoked());
         assert_eq!(premium.user_message(), PREMIUM_REQUIRED);
         assert!(!map_connect_error(&failed("Travel restriction"), true).is_revoked());
         let down = librespot_core::Error::unavailable("x");
