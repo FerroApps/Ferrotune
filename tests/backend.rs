@@ -319,7 +319,7 @@ async fn playlist_uses_protobuf_and_official_client_headers() {
         .and(header("app-platform", "Linux"))
         .and(header(
             "spotify-app-version",
-            librespot_core::version::SPOTIFY_SEMANTIC_VERSION,
+            ferrotune::net::client::SPOTIFY_SEMANTIC_VERSION,
         ))
         .and(header("accept", "application/x-protobuf"))
         .respond_with(

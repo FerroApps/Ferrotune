@@ -119,6 +119,12 @@ pub async fn request_obfuscated_key(
         .timeout(std::time::Duration::from_secs(30))
         .build()?;
 
+    let dpop_proof = session
+        .create_dpop_proof("POST", &url, Some(&token.access_token))
+        .map_err(|e| format!("playplay: DPoP proof creation failed: {e}"))?;
+
+    tracing::debug!("playplay: attaching DPoP proof to license request");
+
     let mut req = http
         .post(&url)
         .header("Content-Type", "application/x-protobuf")
@@ -126,7 +132,8 @@ pub async fn request_obfuscated_key(
         .header(
             "Authorization",
             format!("{} {}", token.token_type, token.access_token),
-        );
+        )
+        .header("DPoP", &dpop_proof);
 
     if let Some(ref ct) = client_token {
         req = req.header("client-token", ct.as_str());

@@ -29,9 +29,34 @@ use futures::future::{BoxFuture, Shared};
 use reqwest::{Method, StatusCode};
 use sha2::{Digest, Sha256};
 
+use super::dpop::{self, DpopKey};
 use super::tokens::{TokenCache, TokenSource};
 use crate::error::{Error, Result};
 use crate::store::Store;
+
+/// Shared per-host DPoP nonce cache.
+///
+/// Spotify's backends challenge the client with `DPoP-Nonce` in the response
+/// (RFC 9449 §8). A later request on that endpoint has to echo the latest
+/// nonce the server sent, or it is refused with `use_dpop_nonce`. Different
+/// hosts (spclient, accounts, clienttoken) can hand out independent nonces,
+/// so this map is keyed by host.
+#[derive(Default)]
+pub struct NonceState {
+    nonces: Mutex<HashMap<String, String>>,
+}
+
+impl NonceState {
+    pub fn get(&self, host: &str) -> Option<String> {
+        self.nonces.lock().ok()?.get(host).cloned()
+    }
+
+    pub fn set(&self, host: &str, nonce: String) {
+        if let Ok(mut m) = self.nonces.lock() {
+            m.insert(host.to_owned(), nonce);
+        }
+    }
+}
 
 /// Longest server-requested wait we sleep through inside one request.
 pub const MAX_INLINE_WAIT: Duration = Duration::from_secs(10);
@@ -154,7 +179,13 @@ impl Request {
     }
 }
 
-/// Headers the desktop client sends, with the values librespot announces.
+/// Headers the desktop client sends, byte-for-byte identical to the values
+/// the official Spotify desktop client v1.2.95.453 announces.
+///
+/// Extracted from `/share/spotify/.spotify-wrapped` by `strings` — the user-
+/// agent format is `Spotify/%d %s/%d (%s)` (build number, platform, 0,
+/// description) and the semantic version `1.2.95.453` is the one the
+/// Esperanto `DesktopVersion` proto reports.
 #[derive(Debug, Clone)]
 pub struct ClientHeaders {
     pub user_agent: String,
@@ -163,23 +194,33 @@ pub struct ClientHeaders {
     pub accept_language: String,
 }
 
+/// Numeric build id announced by the official Linux desktop client 1.2.95.453.
+///
+/// Computed as `major*10^8 + minor*10^5 + patch*10^3 + build`; the literal
+/// `100295453` also appears verbatim in the stripped binary's `.rodata`.
+pub const SPOTIFY_BUILD_VERSION: u64 = 100_295_453;
+
+/// Semantic version of the official Linux desktop client we mimic.
+pub const SPOTIFY_SEMANTIC_VERSION: &str = "1.2.95.453";
+
+/// Property-set id for the 1.2.95.453 release (found in the binary's `.rodata`).
+pub const SPOTIFY_PROPERTY_SET_ID: &str = "95e5118d3fc65ae6c2645b6f381947d38586e669";
+
 impl ClientHeaders {
+    /// Build the exact header set the official Linux desktop client sends.
+    /// The `(desktop)` suffix of the user-agent is what the native Spotify
+    /// binary emits — never the `(librespot-<sha>)` suffix librespot adds,
+    /// which would make the request trivially distinguishable.
     pub fn from_environment() -> Self {
-        use librespot_core::version;
         let app_platform = match std::env::consts::OS {
             "macos" => "OSX",
             "windows" => "Win32",
             _ => "Linux",
         };
         Self {
-            // Same format as librespot's own HTTP client.
-            user_agent: format!(
-                "Spotify/{} {app_platform}/0 ({})",
-                version::spotify_version(),
-                version::VERSION_STRING
-            ),
+            user_agent: format!("Spotify/{SPOTIFY_BUILD_VERSION} {app_platform}/0 (desktop)"),
             app_platform,
-            app_version: version::spotify_semantic_version(),
+            app_version: SPOTIFY_SEMANTIC_VERSION.to_owned(),
             accept_language: accept_language(std::env::var("LANG").ok().as_deref()),
         }
     }
@@ -224,6 +265,11 @@ pub struct InternalClient {
     inflight: Mutex<HashMap<String, SharedResponse>>,
     limiter: tokio::sync::Semaphore,
     cooldown_until: Mutex<HashMap<String, Instant>>,
+    /// DPoP key pair. When present, every request is signed with a DPoP
+    /// proof JWT and carries the `DPoP` header.
+    dpop_key: Option<Arc<DpopKey>>,
+    /// Per-host DPoP nonce cache (shared with the auth engine).
+    nonce_state: Arc<NonceState>,
 }
 
 impl InternalClient {
@@ -233,6 +279,29 @@ impl InternalClient {
         spclient_override: Option<String>,
         pathfinder_base: String,
         cache: Option<Store>,
+    ) -> Self {
+        Self::with_dpop(
+            http,
+            auth,
+            spclient_override,
+            pathfinder_base,
+            cache,
+            None,
+            Arc::new(NonceState::default()),
+        )
+    }
+
+    /// Build a client that signs every request with a DPoP proof. This is
+    /// the constructor the native engine uses; the plain `new` keeps the
+    /// legacy (unsigned) path for tests.
+    pub fn with_dpop(
+        http: reqwest::Client,
+        auth: Arc<dyn SessionAuth>,
+        spclient_override: Option<String>,
+        pathfinder_base: String,
+        cache: Option<Store>,
+        dpop_key: Option<Arc<DpopKey>>,
+        nonce_state: Arc<NonceState>,
     ) -> Self {
         Self {
             http,
@@ -245,6 +314,8 @@ impl InternalClient {
             inflight: Mutex::new(HashMap::new()),
             limiter: tokio::sync::Semaphore::new(MAX_CONCURRENT),
             cooldown_until: Mutex::new(HashMap::new()),
+            dpop_key,
+            nonce_state,
         }
     }
 
@@ -370,11 +441,18 @@ impl InternalClient {
             return Err(Error::RateLimited(left.as_secs().max(1)));
         }
         let url = self.url(&req.target).await?;
+        let htu = dpop::htu_from_url(&url);
+        let host = reqwest::Url::parse(&url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .unwrap_or_default();
+        let method_str = req.method.as_str().to_owned();
         let source: &dyn TokenSource = self.auth.as_ref();
         let mut token = self.tokens.get(source).await?;
         let client_token = self.auth.client_token().await.unwrap_or(None);
         let mut refreshed = false;
         let mut attempt = 0u32;
+        let mut nonce_retried = false;
         loop {
             attempt += 1;
             let mut rb = self
@@ -392,6 +470,19 @@ impl InternalClient {
             if let Some(ct) = &client_token {
                 rb = rb.header("client-token", ct);
             }
+            // DPoP proof: rebuilt per attempt so jti is unique and the ath
+            // claim always matches the current access token.
+            if let Some(key) = &self.dpop_key {
+                let nonce = self.nonce_state.get(&host);
+                match key.proof(&method_str, &htu, nonce.as_deref(), Some(token.expose())) {
+                    Ok(proof) => {
+                        rb = rb.header("DPoP", proof);
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "could not build DPoP proof");
+                    }
+                }
+            }
             if let Some(ct) = req.content_type {
                 rb = rb.header(reqwest::header::CONTENT_TYPE, ct);
             }
@@ -404,11 +495,29 @@ impl InternalClient {
             };
             let resp = rb.send().await?;
             let status = resp.status();
+            // Snapshot nonce + error code before the body is consumed.
+            let new_nonce = dpop::extract_nonce(resp.headers());
+            if let Some(n) = new_nonce.clone() {
+                self.nonce_state.set(&host, n);
+            }
+            let dpop_err = dpop_error_code(resp.headers());
             tracing::debug!(method = %req.method, status = status.as_u16(), "internal api");
             if status.is_success() {
                 return Ok(resp.bytes().await?.to_vec());
             }
             match status {
+                // RFC 9449 §8: the server can refuse a proof that lacks a
+                // nonce or carries a stale one. Only one such retry per
+                // request; it does not count as an attempt.
+                StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST
+                    if self.dpop_key.is_some()
+                        && !nonce_retried
+                        && (dpop_err.as_deref() == Some("use_dpop_nonce")
+                            || new_nonce.is_some()) =>
+                {
+                    nonce_retried = true;
+                    attempt = attempt.saturating_sub(1);
+                }
                 StatusCode::UNAUTHORIZED if !refreshed => {
                     refreshed = true;
                     token = self.tokens.refresh_after(source, &token).await?;
@@ -440,6 +549,18 @@ impl InternalClient {
             }
         }
     }
+}
+
+/// `WWW-Authenticate: DPoP error="use_dpop_nonce"` → `use_dpop_nonce`.
+fn dpop_error_code(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let v = headers
+        .get(reqwest::header::WWW_AUTHENTICATE)?
+        .to_str()
+        .ok()?;
+    let marker = "error=\"";
+    let start = v.find(marker)? + marker.len();
+    let rest = &v[start..];
+    rest.find('"').map(|end| rest[..end].to_owned())
 }
 
 fn is_transient(e: &Error) -> bool {
@@ -507,13 +628,25 @@ mod tests {
     }
 
     #[test]
-    fn headers_match_librespot() {
+    fn headers_match_official_desktop_client() {
         let h = ClientHeaders::from_environment();
-        assert!(h.user_agent.starts_with("Spotify/"));
-        assert_eq!(
-            h.app_version,
-            librespot_core::version::SPOTIFY_SEMANTIC_VERSION
+        // Numeric build id and descriptor extracted from
+        // `.spotify-wrapped` (official Spotify Linux 1.2.95.453).
+        assert!(
+            h.user_agent.starts_with("Spotify/100295453 "),
+            "{}",
+            h.user_agent
         );
+        assert!(h.user_agent.ends_with("/0 (desktop)"), "{}", h.user_agent);
+        assert!(
+            ["Linux", "OSX", "Win32"].contains(&h.app_platform),
+            "{}",
+            h.app_platform
+        );
+        assert_eq!(h.app_version, "1.2.95.453");
+        // No "librespot" substring anywhere — the whole point is to be
+        // indistinguishable from the official client.
+        assert!(!h.user_agent.contains("librespot"));
     }
 
     #[test]

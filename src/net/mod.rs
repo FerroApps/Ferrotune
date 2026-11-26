@@ -10,11 +10,14 @@
 pub mod audio_diag;
 pub mod backend;
 pub mod client;
+pub mod client_token;
 pub mod connect_ctl;
+pub mod dpop;
 pub mod images;
 pub mod model;
 pub mod mpris;
 pub mod native;
+pub mod native_auth;
 pub mod paging;
 pub mod pathfinder;
 pub mod playback;

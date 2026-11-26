@@ -81,7 +81,7 @@ pub struct Backend {
     pub home: Arc<dyn HomeApi>,
     pub lyrics: Arc<dyn LyricsApi>,
     /// Lets the app swap the librespot session after a reconnect.
-    pub session: Option<Arc<super::session::LiveAuth>>,
+    pub session: Option<Arc<super::native_auth::NativeAuth>>,
     pub client: Option<Arc<super::client::InternalClient>>,
 }
 
@@ -90,7 +90,7 @@ impl Backend {
     pub fn internal(
         client: Arc<super::client::InternalClient>,
         queries: super::pathfinder::Queries,
-        session: Option<Arc<super::session::LiveAuth>>,
+        session: Option<Arc<super::native_auth::NativeAuth>>,
         store: Option<crate::store::Store>,
     ) -> Self {
         let internal = Arc::new(super::spclient::Internal::new(client.clone(), store));
