@@ -426,7 +426,7 @@ async fn restore_session(
     let Some(session) = connect_stored(secrets.clone(), opts).await? else {
         return Ok(None);
     };
-    let source = build_source(&config, &session, &store, secrets.as_ref())?;
+    let source = build_source(&config, &session, &store, secrets.clone())?;
     let user = source.me().await.ok();
     Ok(Some(SessionReady {
         source,
@@ -466,7 +466,7 @@ async fn login_flow(
     let (session, creds) =
         session::connect(SessionCredentials::AccessToken(tokens.access_token), &opts).await?;
     save_credentials(secrets.clone(), creds).await?;
-    let source = build_source(&config, &session, &store, secrets.as_ref())?;
+    let source = build_source(&config, &session, &store, secrets.clone())?;
     let user = source.me().await.ok();
     Ok(SessionReady {
         source,

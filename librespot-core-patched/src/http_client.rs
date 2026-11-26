@@ -30,7 +30,7 @@ use crate::{
     Error,
     config::{OS, os_version},
     date::Date,
-    version::{FALLBACK_USER_AGENT, VERSION_STRING, spotify_version},
+    version::{FALLBACK_USER_AGENT, spotify_version},
 };
 
 // The 30 seconds interval is documented by Spotify, but the calls per interval
@@ -117,11 +117,10 @@ impl HttpClient {
         };
 
         let user_agent_str = &format!(
-            "Spotify/{} {}/{} ({})",
+            "Spotify/{} {}/{} (desktop)",
             spotify_version(),
             spotify_platform,
             os_version,
-            VERSION_STRING
         );
 
         let user_agent = HeaderValue::from_str(user_agent_str).unwrap_or_else(|err| {

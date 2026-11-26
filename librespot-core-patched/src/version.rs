@@ -16,14 +16,14 @@ pub const SEMVER: &str = env!("CARGO_PKG_VERSION");
 /// A random build id.
 pub const BUILD_ID: &str = env!("LIBRESPOT_BUILD_ID");
 
-/// The protocol version of the Spotify desktop client.
-pub const SPOTIFY_VERSION: u64 = 124200290;
+/// The protocol version of the Spotify desktop client (1.2.95.453).
+pub const SPOTIFY_VERSION: u64 = 100_295_453;
 
 /// The semantic version of the Spotify desktop client.
-pub const SPOTIFY_SEMANTIC_VERSION: &str = "1.2.52.442";
+pub const SPOTIFY_SEMANTIC_VERSION: &str = "1.2.95.453";
 
-/// `property_set_id` related to desktop version 1.2.52.442
-pub const SPOTIFY_PROPERTY_SET_ID: &str = "b4c7e4b5835079ed94391b2e65fca0fdba65eb50";
+/// `property_set_id` related to desktop version 1.2.95.453
+pub const SPOTIFY_PROPERTY_SET_ID: &str = "95e5118d3fc65ae6c2645b6f381947d38586e669";
 
 /// The protocol version of the Spotify mobile app.
 pub const SPOTIFY_MOBILE_VERSION: &str = "8.9.82.620";
@@ -36,7 +36,7 @@ pub const SPOTIFY_MOBILE_PROPERTY_SET_ID: &str =
 pub const SPOTIFY_SPIRC_VERSION: &str = "3.2.6";
 
 /// The user agent to fall back to, if one could not be determined dynamically.
-pub const FALLBACK_USER_AGENT: &str = "Spotify/124200290 Linux/0 (librespot)";
+pub const FALLBACK_USER_AGENT: &str = "Spotify/100295453 Linux/0 (desktop)";
 
 pub fn spotify_version() -> String {
     match crate::config::OS {

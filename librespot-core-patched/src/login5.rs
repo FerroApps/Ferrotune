@@ -17,9 +17,10 @@ use librespot_protocol::{
     },
 };
 use protobuf::well_known_types::duration::Duration as ProtoDuration;
-use protobuf::{Message, MessageField};
+use protobuf::{Message, MessageField, UnknownValue};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use uuid::Uuid;
 use thiserror::Error;
 use tokio::time::sleep;
 
@@ -130,6 +131,14 @@ impl Login5Manager {
             login_method: Some(login),
             ..Default::default()
         };
+        // Field 4 (flow_id): a UUID the official desktop client includes in
+        // every v4 LoginRequest. The proto schema we compile from is v3, so
+        // the field isn't declared — inject it as an unknown field.
+        let flow_id = Uuid::new_v4().to_string();
+        login_request
+            .special_fields
+            .mut_unknown_fields()
+            .add_value(4, UnknownValue::LengthDelimited(flow_id.into_bytes()));
 
         let mut response = self.request(&login_request).await?;
         let mut count = 0;
