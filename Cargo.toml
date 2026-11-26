@@ -18,6 +18,8 @@ librespot-core = { version = "0.8", default-features = false, features = ["rustl
 librespot-playback = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots", "rodio-backend"] }
 librespot-metadata = { version = "0.8", default-features = false, features = ["rustls-tls-webpki-roots"] }
 librespot-protocol = "0.8"
+spotify-proto = { path = "crates/spotify-proto" }
+spotify-protocol = { path = "crates/spotify-protocol" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "http2"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

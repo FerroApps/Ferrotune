@@ -131,8 +131,8 @@ async fn resolve_cdn(
     };
 
     // Parse StorageResolveResponse protobuf.
-    use librespot_protocol::storage_resolve::StorageResolveResponse;
     use protobuf::Message;
+    use spotify_proto::storage_resolve::StorageResolveResponse;
     let msg = StorageResolveResponse::parse_from_bytes(&raw)?;
 
     // Pick the first CDN URL.

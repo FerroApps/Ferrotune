@@ -46,8 +46,8 @@ pub async fn fetch_client_token(
     client_version: &str,
     client_secret: Option<&[u8]>,
 ) -> Result<ClientToken> {
-    use librespot_protocol::clienttoken_http::*;
-    use librespot_protocol::connectivity::*;
+    use spotify_proto::clienttoken_http::*;
+    use spotify_proto::connectivity::*;
 
     let mut platform_data = PlatformSpecificData::new();
     let mut linux = NativeDesktopLinuxData::new();
@@ -95,9 +95,9 @@ pub async fn fetch_client_token(
 async fn solve_challenges(
     http: &reqwest::Client,
     client_secret: Option<&[u8]>,
-    challenges: librespot_protocol::clienttoken_http::ChallengesResponse,
+    challenges: spotify_proto::clienttoken_http::ChallengesResponse,
 ) -> Result<ClientToken> {
-    use librespot_protocol::clienttoken_http::*;
+    use spotify_proto::clienttoken_http::*;
 
     let mut answers: Vec<ChallengeAnswer> = Vec::new();
 
@@ -166,7 +166,7 @@ async fn solve_challenges(
     }
 }
 
-fn granted(token: librespot_protocol::clienttoken_http::GrantedTokenResponse) -> ClientToken {
+fn granted(token: spotify_proto::clienttoken_http::GrantedTokenResponse) -> ClientToken {
     let ttl = Duration::from_secs(token.refresh_after_seconds.max(0) as u64);
     ClientToken {
         token: token.token,
@@ -177,8 +177,8 @@ fn granted(token: librespot_protocol::clienttoken_http::GrantedTokenResponse) ->
 async fn post_proto(
     http: &reqwest::Client,
     body: &[u8],
-) -> Result<librespot_protocol::clienttoken_http::ClientTokenResponse> {
-    use librespot_protocol::clienttoken_http::*;
+) -> Result<spotify_proto::clienttoken_http::ClientTokenResponse> {
+    use spotify_proto::clienttoken_http::*;
     let resp_bytes = http
         .post(CLIENT_TOKEN_URL)
         .header("Accept", "application/x-protobuf")

@@ -7,9 +7,9 @@
 //!   leniently through `serde_json::Value` pointers because their shapes
 //!   change over time. An entry we cannot understand is dropped, never fatal.
 
-use librespot_protocol::metadata;
-use librespot_protocol::playlist4_external::{ListAttributes, SelectedListContent};
 use serde_json::Value;
+use spotify_proto::metadata;
+use spotify_proto::playlist4_external::{ListAttributes, SelectedListContent};
 
 use super::model::{
     Album, AlbumKind, AlbumRef, Artist, ArtistRef, Image, LyricLine, Lyrics, Playlist, Track,
@@ -20,15 +20,12 @@ pub const IMAGE_CDN: &str = "https://i.scdn.co/image/";
 
 /// 16-byte gid -> base62 id.
 pub fn gid_to_id(gid: &[u8]) -> Option<String> {
-    librespot_core::SpotifyId::from_raw(gid)
-        .ok()?
-        .to_base62()
-        .ok()
+    Some(spotify_protocol::SpotifyId::from_raw(gid).ok()?.to_base62())
 }
 
 /// base62 id -> 16-byte gid.
 pub fn id_to_gid(id: &str) -> Option<[u8; 16]> {
-    Some(librespot_core::SpotifyId::from_base62(id).ok()?.to_raw())
+    Some(*spotify_protocol::SpotifyId::from_base62(id).ok()?.to_raw())
 }
 
 /// `spotify:<kind>:<id>` -> `(kind, id)`.
@@ -716,7 +713,7 @@ mod tests {
 
     #[test]
     fn list_images_fall_back_to_picture_sizes_and_format_attributes() {
-        use librespot_protocol::playlist4_external::{FormatListAttribute, PictureSize};
+        use spotify_proto::playlist4_external::{FormatListAttribute, PictureSize};
         let mut a = ListAttributes::new();
         assert!(list_images(Some(&a)).is_empty());
         let mut f = FormatListAttribute::new();

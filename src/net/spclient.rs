@@ -21,16 +21,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use librespot_protocol::extended_metadata::{
-    BatchedEntityRequest, BatchedEntityRequestHeader, BatchedExtensionResponse, EntityRequest,
-    ExtensionQuery,
-};
-use librespot_protocol::extension_kind::ExtensionKind;
-use librespot_protocol::metadata;
-use librespot_protocol::playlist4_external::SelectedListContent;
 use protobuf::{EnumOrUnknown, Message as _, MessageField};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use spotify_proto::extended_metadata::{
+    BatchedEntityRequest, BatchedEntityRequestHeader, BatchedExtensionResponse, EntityRequest,
+    ExtensionQuery,
+};
+use spotify_proto::extension_kind::ExtensionKind;
+use spotify_proto::metadata;
+use spotify_proto::playlist4_external::SelectedListContent;
 
 use super::backend::{CatalogApi, LibraryApi, LyricsApi, PlaylistApi};
 use super::client::{COLLECTION_PROTO, InternalClient, JSON, PROTOBUF, Request, Target};

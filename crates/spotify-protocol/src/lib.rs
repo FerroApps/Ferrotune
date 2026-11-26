@@ -27,4 +27,4 @@ pub use mercury::{MercuryManager, MercuryMethod, MercuryResponse};
 pub use metadata::{AudioFile, AudioFileFormat, MetadataType, TrackMetadata};
 pub use session::Session;
 pub use spclient::SpClient;
-pub use token::{ClientToken, DpopKey, TokenManager};
+pub use token::{ClientToken, DpopKey, Login5, Login5Token, TokenManager};

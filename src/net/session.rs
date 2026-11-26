@@ -68,7 +68,7 @@ impl SessionCredentials {
             Self::AccessToken(t) => Credentials::with_access_token(t.expose()),
             Self::Stored(s) => Credentials {
                 username: Some(s.username.clone()),
-                auth_type: librespot_protocol::authentication::AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
+                auth_type: spotify_proto::authentication::AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
                 auth_data: B64
                     .decode(s.auth_data.as_bytes())
                     .map_err(|_| Error::revoked("stored Spotify credentials are corrupt"))?,

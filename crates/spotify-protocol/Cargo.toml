@@ -66,6 +66,9 @@ ecdsa = { version = "0.16", features = ["signing"] }
 sha2 = "0.10"
 base64ct = { version = "1", features = ["alloc"] }
 
+# UUID (flow_id in Login5 requests)
+uuid = { version = "1", features = ["v4"] }
+
 # Logging
 tracing = "0.1"
 

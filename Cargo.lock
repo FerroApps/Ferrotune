@@ -1606,6 +1606,8 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "spotify-proto",
+ "spotify-protocol",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -5992,6 +5994,7 @@ dependencies = [
  "tokio-util",
  "tracing",
  "url",
+ "uuid",
 ]
 
 [[package]]

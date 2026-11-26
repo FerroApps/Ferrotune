@@ -15,8 +15,8 @@
 
 use std::sync::Arc;
 
-use librespot_protocol::connect::Cluster;
 use serde_json::{Value, json};
+use spotify_proto::connect::Cluster;
 
 use super::client::{InternalClient, JSON, Request, Target};
 use crate::error::Result;
@@ -97,8 +97,8 @@ pub fn observer_id(device_id: &str) -> String {
     format!("{OBSERVER_PREFIX}{device_id}")
 }
 
-fn kind_of(t: librespot_protocol::devices::DeviceType) -> DeviceKind {
-    use librespot_protocol::devices::DeviceType as T;
+fn kind_of(t: spotify_proto::devices::DeviceType) -> DeviceKind {
+    use spotify_proto::devices::DeviceType as T;
     match t {
         T::COMPUTER | T::CHROMEBOOK => DeviceKind::Computer,
         T::SMARTPHONE | T::SMARTWATCH => DeviceKind::Smartphone,
@@ -203,14 +203,11 @@ pub fn parse_cluster(c: &Cluster, own_id: &str) -> ClusterState {
 }
 
 /// The observer registration body (protobuf `PutStateRequest`).
-pub fn observer_request(
-    observer_id: &str,
-    name: &str,
-) -> librespot_protocol::connect::PutStateRequest {
-    use librespot_protocol::connect::{
+pub fn observer_request(observer_id: &str, name: &str) -> spotify_proto::connect::PutStateRequest {
+    use spotify_proto::connect::{
         Capabilities, Device, DeviceInfo, MemberType, PutStateReason, PutStateRequest,
     };
-    use librespot_protocol::devices::DeviceType;
+    use spotify_proto::devices::DeviceType;
     let caps = Capabilities {
         hidden: true,
         is_observable: true,
@@ -223,7 +220,7 @@ pub fn observer_request(
         device_id: observer_id.to_owned(),
         device_type: DeviceType::OBSERVER.into(),
         capabilities: Some(caps).into(),
-        device_software_version: librespot_core::version::SEMVER.to_owned(),
+        device_software_version: spotify_protocol::version::SEMANTIC_VERSION.to_owned(),
         ..Default::default()
     };
     PutStateRequest {
@@ -406,7 +403,7 @@ pub async fn observe(
 ) {
     use futures::StreamExt;
     use librespot_core::dealer::protocol::Message;
-    use librespot_protocol::connect::ClusterUpdate;
+    use spotify_proto::connect::ClusterUpdate;
 
     let observer = observer_id(&own_id);
     let mut pushes = match session.dealer().listen_for(
@@ -473,9 +470,9 @@ pub async fn observe(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use librespot_protocol::connect::{Capabilities, DeviceInfo};
-    use librespot_protocol::devices::DeviceType;
-    use librespot_protocol::player::{ContextPlayerOptions, PlayerState, ProvidedTrack};
+    use spotify_proto::connect::{Capabilities, DeviceInfo};
+    use spotify_proto::devices::DeviceType;
+    use spotify_proto::player::{ContextPlayerOptions, PlayerState, ProvidedTrack};
 
     fn dev(name: &str, t: DeviceType, volume: u32) -> DeviceInfo {
         DeviceInfo {
@@ -622,7 +619,7 @@ mod tests {
         use protobuf::Message as _;
         let r = observer_request("hobs_x", "Ferrotune");
         let bytes = r.write_to_bytes().unwrap();
-        let back = librespot_protocol::connect::PutStateRequest::parse_from_bytes(&bytes).unwrap();
+        let back = spotify_proto::connect::PutStateRequest::parse_from_bytes(&bytes).unwrap();
         let info = back.device.device_info.clone().unwrap();
         assert_eq!(info.device_id, "hobs_x");
         assert_eq!(

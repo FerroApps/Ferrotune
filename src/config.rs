@@ -47,10 +47,9 @@ pub const SCOPES: &[&str] = &[
     "user-top-read",
 ];
 
-/// The client id the official desktop client (and librespot) uses. Taken
-/// from librespot's own `SessionConfig` so we never hard-code it.
+/// The client id the official desktop client (and librespot) uses.
 pub fn desktop_client_id() -> String {
-    librespot_core::SessionConfig::default().client_id
+    spotify_protocol::version::CLIENT_ID.to_owned()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
