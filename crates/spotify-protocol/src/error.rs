@@ -20,6 +20,34 @@ pub enum ProtocolError {
 
     #[error("invalid hex: {0}")]
     InvalidHex(String),
+
+    // --- Session / connection errors ---
+    #[error("authentication failed: {0}")]
+    AuthFailed(String),
+
+    #[error("AP connection error: {0}")]
+    Connection(String),
+
+    #[error("AP resolve error: {0}")]
+    ApResolve(String),
+
+    #[error("session not connected")]
+    NotConnected,
+
+    #[error("unknown packet command: 0x{0:02x}")]
+    UnknownPacket(u8),
+
+    #[error("XML parse error: {0}")]
+    XmlParse(String),
+
+    #[error("I/O error: {0}")]
+    Io(String),
+}
+
+impl From<std::io::Error> for ProtocolError {
+    fn from(err: std::io::Error) -> Self {
+        Self::Io(err.to_string())
+    }
 }
 
 /// Convenience alias used throughout this crate.

@@ -8,3 +8,51 @@ license = "MIT"
 
 [dependencies]
 thiserror = "2"
+
+# AP codec + handshake
+bytes = "1"
+tokio = { version = "1", features = ["net", "io-util", "time", "macros"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+futures-util = { version = "0.3", features = ["sink"] }
+
+# DH key exchange
+num-bigint = "0.4"
+num-traits = "0.2"
+num-integer = "0.1"
+
+# Packet type enum derives
+num-derive = "0.4"
+
+# HMAC-SHA1 key derivation
+hmac = "0.12"
+sha1 = { version = "0.10", features = ["oid"] }
+
+# RSA signature verification
+rsa = "0.9"
+
+# Random nonces and DH private keys
+rand = "0.9"
+
+# AP resolver
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Protobuf message types
+protobuf = "3.7"
+spotify-proto = { path = "../spotify-proto" }
+
+# Session config (proxy URL type)
+url = "2"
+
+# Device ID hex encoding
+hex = "0.4"
+
+# ProductInfo XML parsing
+quick-xml = "0.37"
+
+# Logging
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }
