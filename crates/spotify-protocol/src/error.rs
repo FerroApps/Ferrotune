@@ -42,6 +42,12 @@ pub enum ProtocolError {
 
     #[error("I/O error: {0}")]
     Io(String),
+
+    #[error("token error: {0}")]
+    Token(String),
+
+    #[error("HTTP error: {0}")]
+    Http(String),
 }
 
 impl From<std::io::Error> for ProtocolError {

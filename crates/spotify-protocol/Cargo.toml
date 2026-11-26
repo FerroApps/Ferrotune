@@ -59,8 +59,18 @@ tokio-tungstenite = { version = "0.28", default-features = false, features = ["c
 base64 = "0.22"
 flate2 = "1"
 
+# DPoP (RFC 9449) — EC P-256 proof-of-possession JWTs
+p256 = { version = "0.13", features = ["ecdsa", "jwk"] }
+elliptic-curve = { version = "0.13", features = ["sec1"] }
+ecdsa = { version = "0.16", features = ["signing"] }
+sha2 = "0.10"
+base64ct = { version = "1", features = ["alloc"] }
+
 # Logging
 tracing = "0.1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"] }

@@ -1384,6 +1384,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47"
 dependencies = [
  "base16ct",
+ "base64ct",
  "crypto-bigint",
  "digest",
  "ff",
@@ -1393,6 +1394,8 @@ dependencies = [
  "pkcs8",
  "rand_core 0.6.4",
  "sec1",
+ "serde_json",
+ "serdect",
  "subtle",
  "zeroize",
 ]
@@ -5465,6 +5468,7 @@ dependencies = [
  "der",
  "generic-array",
  "pkcs8",
+ "serdect",
  "subtle",
  "zeroize",
 ]
@@ -5619,6 +5623,16 @@ dependencies = [
  "form_urlencoded",
  "itoa",
  "ryu",
+ "serde",
+]
+
+[[package]]
+name = "serdect"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a84f14a19e9a014bb9f4512488d9829a68e04ecabffb0f9904cd1ace94598177"
+dependencies = [
+ "base16ct",
  "serde",
 ]
 
@@ -5947,16 +5961,21 @@ name = "spotify-protocol"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "base64ct",
  "bytes",
+ "ecdsa",
+ "elliptic-curve",
  "flate2",
  "form_urlencoded",
  "futures-util",
  "hex",
  "hmac",
+ "libc",
  "num-bigint",
  "num-derive",
  "num-integer",
  "num-traits",
+ "p256",
  "protobuf",
  "quick-xml 0.37.5",
  "rand 0.9.5",
@@ -5965,6 +5984,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "spotify-proto",
  "thiserror 2.0.21",
  "tokio",
