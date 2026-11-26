@@ -185,7 +185,7 @@ pub fn classify_login_failure(message: &str) -> Option<LoginFailure> {
     })
 }
 
-pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required. Ferrotune plays audio through librespot, which only works with Premium accounts.";
+pub const PREMIUM_REQUIRED: &str = "Spotify rejected the session (the server returned \"Premium required\", which usually means the client was not recognised). Retrying with updated credentials may fix this.";
 
 fn map_connect_error(e: &librespot_core::Error, stored: bool) -> Error {
     use librespot_core::error::ErrorKind;
@@ -196,7 +196,7 @@ fn map_connect_error(e: &librespot_core::Error, stored: bool) -> Error {
         Some(LoginFailure::BadCredentials) => {
             return Error::auth("Spotify refused the login (bad credentials). Please try again.");
         }
-        Some(LoginFailure::PremiumRequired) => return Error::revoked(PREMIUM_REQUIRED),
+        Some(LoginFailure::PremiumRequired) => return Error::auth(PREMIUM_REQUIRED),
         Some(LoginFailure::Transient) => {
             return Error::Net("Spotify could not complete the login right now".into());
         }
@@ -492,7 +492,7 @@ mod tests {
             assert!(matches!(e, Error::Net(_)), "{transient}: {e:?}");
         }
         let premium = map_connect_error(&failed("Premium account required"), true);
-        assert!(premium.is_revoked());
+        assert!(!premium.is_revoked());
         assert_eq!(premium.user_message(), PREMIUM_REQUIRED);
         assert!(!map_connect_error(&failed("Travel restriction"), true).is_revoked());
         let down = librespot_core::Error::unavailable("x");
