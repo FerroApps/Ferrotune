@@ -16,16 +16,20 @@
 //! Linux/0 (desktop)`), the official client id, bearer tokens, a client
 //! token, AND a DPoP proof — exactly like a real desktop client.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use futures::future::BoxFuture;
 
 use super::client::{NonceState, SessionAuth};
 use super::client_token::{self, ClientToken};
 use super::dpop::{DPOP_KEYRING_KEY, DpopKey};
+use super::session::StoredCredentials;
 use super::tokens::{AccessToken, TokenSource};
-use crate::auth::secrets::{Secret, SecretStore};
+use crate::auth::secrets::{Secret, SecretStore, KEY_LIBRESPOT};
 use crate::error::{Error, Result};
 
 /// The client version string we announce — same as the official desktop
@@ -52,6 +56,11 @@ pub struct NativeAuth {
     device_id: String,
     /// HTTP client for client-token requests.
     http: reqwest::Client,
+    /// Secret store for persisting the DPoP-bound credential.
+    secrets: Arc<dyn SecretStore>,
+    /// Set once after the first DPoP-bound credential is persisted, so
+    /// the app knows a reconnect with the upgraded credential is worthwhile.
+    credential_upgraded: AtomicBool,
 }
 
 impl NativeAuth {
@@ -62,7 +71,7 @@ impl NativeAuth {
     /// and the tokens it mints stay bound to one identity.
     pub fn new(
         session: librespot_core::Session,
-        secrets: &dyn SecretStore,
+        secrets: Arc<dyn SecretStore>,
         client_id: String,
         http: reqwest::Client,
     ) -> Result<Self> {
@@ -89,6 +98,8 @@ impl NativeAuth {
             client_id,
             device_id,
             http,
+            secrets,
+            credential_upgraded: AtomicBool::new(false),
         })
     }
 
@@ -110,6 +121,33 @@ impl NativeAuth {
     pub fn replace(&self, session: librespot_core::Session) {
         if let Ok(mut s) = self.session.write() {
             *s = session;
+        }
+        self.credential_upgraded.store(false, Ordering::Relaxed);
+    }
+
+    /// Whether the first token fetch returned a DPoP-bound stored
+    /// credential that was persisted. The app should reconnect the session
+    /// with the upgraded credential so the AP grants audio keys.
+    pub fn credential_upgraded(&self) -> bool {
+        self.credential_upgraded.load(Ordering::Relaxed)
+    }
+
+    /// Save a DPoP-bound stored credential from the login5 response.
+    fn persist_upgraded_credential(&self, username: &str, auth_data: &[u8]) {
+        let creds = StoredCredentials {
+            username: username.to_owned(),
+            auth_data: B64.encode(auth_data),
+        };
+        match serde_json::to_string(&creds) {
+            Ok(json) => {
+                if let Err(e) = self.secrets.set(KEY_LIBRESPOT, &Secret::new(json)) {
+                    tracing::warn!(error = %e, "could not persist DPoP-bound credential");
+                } else {
+                    tracing::info!("persisted DPoP-bound credential for next session");
+                    self.credential_upgraded.store(true, Ordering::Relaxed);
+                }
+            }
+            Err(e) => tracing::warn!(error = %e, "could not serialise credential"),
         }
     }
 
@@ -149,11 +187,21 @@ impl TokenSource for NativeAuth {
             if session.is_invalid() {
                 return Err(Error::Net("the Spotify session is reconnecting".into()));
             }
-            let t = session
+            let (t, cred) = session
                 .login5()
-                .auth_token()
+                .auth_token_and_credential()
                 .await
                 .map_err(|e| Error::auth(format!("could not get a session token: {e}")))?;
+
+            // The login5 v4 response with DPoP returns a stored credential
+            // that is bound to the DPoP key. Persisting it means the next
+            // AP session authenticates as an official desktop client, which
+            // unlocks audio-key access on accounts that deny librespot.
+            if !cred.is_empty() && !self.credential_upgraded.load(Ordering::Relaxed) {
+                let username = session.username();
+                self.persist_upgraded_credential(&username, &cred);
+            }
+
             let age = t.timestamp.elapsed().unwrap_or_default();
             let left = t.expires_in.saturating_sub(age);
             Ok(AccessToken {

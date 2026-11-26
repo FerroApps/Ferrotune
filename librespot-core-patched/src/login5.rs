@@ -26,7 +26,7 @@ use tokio::time::sleep;
 const MAX_LOGIN_TRIES: u8 = 3;
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(3);
 
-const LOGIN5_URL: &str = "https://login5.spotify.com/v3/login";
+const LOGIN5_URL: &str = "https://login5.spotify.com/v4/login";
 const DPOP_HEADER: HeaderName = HeaderName::from_static("dpop");
 const DPOP_NONCE_HEADER: HeaderName = HeaderName::from_static("dpop-nonce");
 
@@ -188,6 +188,17 @@ impl Login5Manager {
     }
 
     pub async fn auth_token(&self) -> Result<Token, Error> {
+        let (token, _cred) = self.auth_token_and_credential().await?;
+        Ok(token)
+    }
+
+    /// Like [`auth_token`] but also returns the stored credential from the
+    /// login5 response. When the server is sent a DPoP proof, the credential
+    /// it hands back is bound to the DPoP key — using it on the next AP
+    /// session connect makes the server treat the connection as an official
+    /// desktop client, which is required for audio-key access on some
+    /// accounts.
+    pub async fn auth_token_and_credential(&self) -> Result<(Token, Vec<u8>), Error> {
         let auth_data = self.session().auth_data();
         if auth_data.is_empty() {
             return Err(Login5Error::NoStoredCredentials.into());
@@ -203,7 +214,7 @@ impl Login5Manager {
         });
 
         if let Some(auth_token) = auth_token {
-            return Ok(auth_token);
+            return Ok((auth_token, Vec::new()));
         }
 
         let method = Login_method::StoredCredential(StoredCredential {
@@ -217,6 +228,7 @@ impl Login5Manager {
             token_response.access_token,
             token_response.access_token_expires_in,
         );
+        let stored_credential = token_response.stored_credential;
 
         let token = self.lock(|inner| {
             inner.auth_token = Some(auth_token.clone());
@@ -225,7 +237,9 @@ impl Login5Manager {
 
         trace!("Got auth token: {auth_token:?}");
 
-        token.ok_or(Login5Error::NoStoredCredentials.into())
+        token
+            .map(|t| (t, stored_credential))
+            .ok_or(Login5Error::NoStoredCredentials.into())
     }
 
     fn handle_challenges(

@@ -347,7 +347,7 @@ fn build_source(
     config: &Config,
     session: &SpotifySession,
     store: &Store,
-    secrets: &dyn SecretStore,
+    secrets: Arc<dyn SecretStore>,
 ) -> Result<DataSource> {
     let http = http_client();
     let auth = Arc::new(crate::net::native_auth::NativeAuth::new(
