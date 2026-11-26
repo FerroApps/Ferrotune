@@ -5,8 +5,9 @@
 //! Spotify desktop client at the protocol level:
 //!
 //! 1. Generates a P-256 DPoP key pair (persisted in the OS keyring).
-//! 2. Refreshes access tokens via librespot's login5 (the session already
-//!    handles the wire protocol).
+//! 2. Refreshes access tokens via `spotify_protocol::Login5` — an
+//!    independent HTTP-based token client that talks directly to
+//!    `login5.spotify.com`, decoupled from librespot's AP session.
 //! 3. Acquires client tokens independently (not through librespot's
 //!    spclient, so we know the challenge logic byte-for-byte).
 //! 4. Exposes the DPoP key + shared nonce state the `InternalClient` uses
@@ -15,6 +16,10 @@
 //! The server sees: the official desktop user-agent (`Spotify/100295453
 //! Linux/0 (desktop)`), the official client id, bearer tokens, a client
 //! token, AND a DPoP proof — exactly like a real desktop client.
+//!
+//! The librespot session is still held for spclient endpoint resolution,
+//! client-token fallback, and identity queries (username, country, product)
+//! until those are also migrated to `spotify_protocol`.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
@@ -39,10 +44,13 @@ pub const SPOTIFY_CLIENT_VERSION: &str = super::client::SPOTIFY_SEMANTIC_VERSION
 
 /// The native auth engine.
 pub struct NativeAuth {
-    /// The librespot session (kept for AP connection, Connect, and login5
-    /// token refresh — librespot's login5 implementation handles the
-    /// protocol over the authenticated AP channel).
+    /// The librespot session (kept for AP connection, Connect, spclient
+    /// endpoint resolution, and client-token fallback — until those
+    /// subsystems are also migrated to `spotify_protocol`).
     session: RwLock<librespot_core::Session>,
+    /// `spotify_protocol::Login5` — independent HTTP token client that
+    /// talks to `login5.spotify.com` without going through librespot.
+    login5: spotify_protocol::Login5,
     /// DPoP key pair. Shared with the `InternalClient` for per-request
     /// proofs.
     dpop_key: Arc<DpopKey>,
@@ -69,6 +77,10 @@ impl NativeAuth {
     /// Loads or generates the DPoP key pair from the keyring. A freshly
     /// generated key is persisted so a later run uses the same `dpop_jkt`
     /// and the tokens it mints stay bound to one identity.
+    ///
+    /// Also creates a `spotify_protocol::Login5` instance that shares the
+    /// same DPoP key — this is the token source for access tokens, decoupled
+    /// from librespot's AP channel.
     pub fn new(
         session: librespot_core::Session,
         secrets: Arc<dyn SecretStore>,
@@ -90,8 +102,30 @@ impl NativeAuth {
             }
         };
         let device_id = session.device_id().to_owned();
+
+        // Build the spotify-protocol DPoP key from the same keyring secret.
+        // Both serialisation formats are compatible (JSON with base64url P-256
+        // scalar), so the same keyring entry works for both.
+        let sp_dpop_key = match secrets.get(DPOP_KEYRING_KEY)? {
+            Some(s) => match spotify_protocol::DpopKey::from_secret(s.expose().as_bytes()) {
+                Ok(k) => Some(Arc::new(k)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "could not load DPoP key for spotify-protocol Login5");
+                    None
+                }
+            },
+            None => None,
+        };
+        let login5 = spotify_protocol::Login5::new(
+            http.clone(),
+            client_id.clone(),
+            device_id.clone(),
+            sp_dpop_key,
+        );
+
         Ok(Self {
             session: RwLock::new(session),
+            login5,
             dpop_key: Arc::new(dpop_key),
             nonce_state: Arc::new(NonceState::default()),
             client_token: tokio::sync::Mutex::new(None),
@@ -187,9 +221,20 @@ impl TokenSource for NativeAuth {
             if session.is_invalid() {
                 return Err(Error::Net("the Spotify session is reconnecting".into()));
             }
-            let (t, cred) = session
-                .login5()
-                .auth_token_and_credential()
+
+            // Get the stored credential and username from the librespot
+            // session — these are the AP authentication blob that login5
+            // exchanges for access tokens.
+            let auth_data = session.auth_data();
+            let username = session.username();
+
+            // Use spotify_protocol::Login5 for the token exchange instead
+            // of librespot's session.login5(). This decouples token refresh
+            // from the librespot AP channel — the first step toward removing
+            // the librespot dependency entirely.
+            let t = self
+                .login5
+                .auth_token_and_credential(&auth_data, &username)
                 .await
                 .map_err(|e| Error::auth(format!("could not get a session token: {e}")))?;
 
@@ -197,16 +242,21 @@ impl TokenSource for NativeAuth {
             // that is bound to the DPoP key. Persisting it means the next
             // AP session authenticates as an official desktop client, which
             // unlocks audio-key access on accounts that deny librespot.
-            if !cred.is_empty() && !self.credential_upgraded.load(Ordering::Relaxed) {
-                let username = session.username();
-                self.persist_upgraded_credential(&username, &cred);
+            if !t.stored_credential.is_empty() && !self.credential_upgraded.load(Ordering::Relaxed)
+            {
+                self.persist_upgraded_credential(&username, &t.stored_credential);
             }
 
-            let age = t.timestamp.elapsed().unwrap_or_default();
-            let left = t.expires_in.saturating_sub(age);
+            let left = if t.is_expired() {
+                Duration::from_secs(1)
+            } else {
+                t.expires_in
+                    .saturating_sub(t.obtained_at.elapsed())
+                    .max(Duration::from_secs(1))
+            };
             Ok(AccessToken {
-                secret: Secret::new(t.access_token),
-                expires_at: Instant::now() + left.max(Duration::from_secs(1)),
+                secret: Secret::new(t.access_token().to_owned()),
+                expires_at: Instant::now() + left,
             })
         })
     }

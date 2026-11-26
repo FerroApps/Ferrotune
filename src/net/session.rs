@@ -354,14 +354,24 @@ pub async fn connect(
 
 /// [`SessionAuth`] over a live librespot session. The session can be swapped
 /// after a reconnect without rebuilding the backends.
+///
+/// Token refresh uses `spotify_protocol::Login5` (an independent HTTP client
+/// to `login5.spotify.com`), decoupled from librespot's AP channel. The
+/// librespot session is still used for spclient endpoint resolution, client
+/// tokens, and identity queries.
 pub struct LiveAuth {
     session: RwLock<librespot_core::Session>,
+    login5: spotify_protocol::Login5,
 }
 
 impl LiveAuth {
-    pub fn new(session: librespot_core::Session) -> Self {
+    pub fn new(session: librespot_core::Session, http: reqwest::Client) -> Self {
+        let client_id = session.client_id();
+        let device_id = session.device_id().to_owned();
+        let login5 = spotify_protocol::Login5::new(http, client_id, device_id, None);
         Self {
             session: RwLock::new(session),
+            login5,
         }
     }
 
@@ -386,18 +396,32 @@ impl TokenSource for LiveAuth {
             if session.is_invalid() {
                 return Err(Error::Net("the Spotify session is reconnecting".into()));
             }
-            // login5 with the session's stored credentials: the same token
-            // source librespot's spclient and dealer use.
-            let t = session
-                .login5()
-                .auth_token()
+
+            // Get the stored credential and username from the librespot
+            // session — the AP authentication blob that login5 exchanges
+            // for access tokens.
+            let auth_data = session.auth_data();
+            let username = session.username();
+
+            // Use spotify_protocol::Login5 for the token exchange instead
+            // of librespot's session.login5(), decoupling token refresh
+            // from the librespot AP channel.
+            let t = self
+                .login5
+                .auth_token(&auth_data, &username)
                 .await
                 .map_err(|e| Error::auth(format!("could not get a session token: {e}")))?;
-            let age = t.timestamp.elapsed().unwrap_or_default();
-            let left = t.expires_in.saturating_sub(age);
+
+            let left = if t.is_expired() {
+                Duration::from_secs(1)
+            } else {
+                t.expires_in
+                    .saturating_sub(t.obtained_at.elapsed())
+                    .max(Duration::from_secs(1))
+            };
             Ok(AccessToken {
-                secret: Secret::new(t.access_token),
-                expires_at: Instant::now() + left.max(Duration::from_secs(1)),
+                secret: Secret::new(t.access_token().to_owned()),
+                expires_at: Instant::now() + left,
             })
         })
     }

@@ -115,6 +115,20 @@ impl From<reqwest::Error> for Error {
     }
 }
 
+impl From<spotify_protocol::ProtocolError> for Error {
+    fn from(e: spotify_protocol::ProtocolError) -> Self {
+        use spotify_protocol::ProtocolError as PE;
+        match e {
+            PE::AuthFailed(m) => Self::auth(m),
+            PE::Token(m) => Self::auth(m),
+            PE::Connection(m) | PE::ApResolve(m) => Self::Net(m),
+            PE::NotConnected => Self::Net("session not connected".into()),
+            PE::Http(m) => Self::Net(m),
+            other => Self::Protocol(other.to_string()),
+        }
+    }
+}
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Wrapper used in `tracing` fields for values that must never be logged
