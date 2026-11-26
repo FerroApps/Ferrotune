@@ -27,6 +27,7 @@ use crate::apresolve::{
 use crate::auth::Credentials;
 use crate::config::SessionConfig;
 use crate::error::{ProtocolError, Result};
+use crate::mercury::MercuryManager;
 use crate::packet::PacketType;
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ pub trait ApTransportStream: Send + 'static {
 // ---------------------------------------------------------------------------
 
 /// Mutable session state protected by fine-grained locks.
-#[allow(dead_code)] // packet_tx placeholder for Mercury/AudioKey subsystems
+#[allow(dead_code)] // packet_tx placeholder for AudioKey subsystem
 struct SessionInner {
     /// Sending half of the AP connection.  `None` before `connect()`.
     sender: Mutex<Option<Box<dyn ApTransportSink>>>,
@@ -109,6 +110,9 @@ struct SessionInner {
     /// Packet-send channel: the dispatch loop is the only writer to the TCP
     /// stream; callers enqueue packets here.
     packet_tx: mpsc::UnboundedSender<(u8, Vec<u8>)>,
+
+    /// Mercury request/response and pub/sub manager.
+    mercury: MercuryManager,
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +212,7 @@ impl Session {
             access_points: RwLock::new(AccessPoints::default()),
             shutdown_tx,
             packet_tx,
+            mercury: MercuryManager::new(),
         };
 
         Self {
@@ -249,6 +254,7 @@ impl Session {
     pub fn shutdown(&self) {
         debug!("session shutdown");
         self.inner.is_valid.store(false, Ordering::Release);
+        self.inner.mercury.shutdown();
         // Signal the dispatch task; ignore error (already shut down).
         let _ = self.inner.shutdown_tx.send(true);
     }
@@ -295,6 +301,11 @@ impl Session {
 
     pub fn client_id(&self) -> String {
         self.inner.client_id.clone()
+    }
+
+    /// Access the Mercury manager for request/response and pub/sub.
+    pub fn mercury(&self) -> &MercuryManager {
+        &self.inner.mercury
     }
 
     // -- async getters (for use from async contexts) -------------------------
@@ -461,12 +472,15 @@ async fn dispatch_packet(session: &Session, cmd: u8, data: Vec<u8>) -> Result<()
 
         Some(PacketType::ProductInfo) => handle_product_info(session, &data).await,
 
-        // Mercury responses — placeholder until Mercury subsystem is built.
+        // Mercury responses — routed to the MercuryManager.
         Some(PacketType::MercuryReq)
         | Some(PacketType::MercurySub)
         | Some(PacketType::MercuryUnsub)
         | Some(PacketType::MercuryEvent) => {
-            trace!(cmd = cmd, "mercury packet (not yet handled)");
+            trace!(cmd = cmd, len = data.len(), "mercury packet");
+            if let Err(e) = session.mercury().handle_packet(cmd, &data) {
+                debug!(error = %e, cmd = cmd, "mercury: packet handling error");
+            }
             Ok(())
         }
 
