@@ -7,11 +7,11 @@
 //! shapes follow the playlist4 protocol as librespot's protobufs describe it;
 //! they have not been verified against the live service.
 
-use librespot_protocol::playlist4_external::{
+use protobuf::{Message as _, MessageField};
+use spotify_proto::playlist4_external::{
     Add, CreateListReply, Delta, Item, ListAttributes, ListAttributesPartialState, ListChanges,
     ListUpdateRequest, Mov, Op, Rem, UpdateListAttributes, op::Kind,
 };
-use protobuf::{Message as _, MessageField};
 
 use crate::error::{Error, Result};
 

@@ -21,17 +21,17 @@ use ferrotune::net::tokens::{AccessToken, TokenSource};
 use ferrotune::net::types::gid_to_id;
 use ferrotune::store::Store;
 use futures::future::BoxFuture;
-use librespot_protocol::entity_extension_data::{EntityExtensionData, EntityExtensionDataHeader};
-use librespot_protocol::extended_metadata::{
+use protobuf::well_known_types::any::Any;
+use protobuf::{Message, MessageField};
+use spotify_proto::entity_extension_data::{EntityExtensionData, EntityExtensionDataHeader};
+use spotify_proto::extended_metadata::{
     BatchedEntityRequest, BatchedExtensionResponse, EntityExtensionDataArray,
 };
-use librespot_protocol::metadata;
-use librespot_protocol::playlist4_external::{
+use spotify_proto::metadata;
+use spotify_proto::playlist4_external::{
     CreateListReply, Item, ItemAttributes, ListAttributes, ListChanges, ListItems,
     ListUpdateRequest, MetaItem, SelectedListContent,
 };
-use protobuf::well_known_types::any::Any;
-use protobuf::{Message, MessageField};
 use wiremock::matchers::{header, method, path, path_regex, query_param};
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -319,7 +319,7 @@ async fn playlist_uses_protobuf_and_official_client_headers() {
         .and(header("app-platform", "Linux"))
         .and(header(
             "spotify-app-version",
-            librespot_core::version::SPOTIFY_SEMANTIC_VERSION,
+            ferrotune::net::client::SPOTIFY_SEMANTIC_VERSION,
         ))
         .and(header("accept", "application/x-protobuf"))
         .respond_with(
@@ -1141,8 +1141,8 @@ async fn me_survives_a_failing_profile_view() {
 
 #[tokio::test]
 async fn rootlist_carries_capabilities_and_server_rendered_covers() {
-    use librespot_protocol::playlist_permission::Capabilities;
-    use librespot_protocol::playlist4_external::{FormatListAttribute, PictureSize};
+    use spotify_proto::playlist_permission::Capabilities;
+    use spotify_proto::playlist4_external::{FormatListAttribute, PictureSize};
     let e = env().await;
     mount_metadata(&e.server).await;
     let mut c = SelectedListContent::new();

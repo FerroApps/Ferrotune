@@ -52,8 +52,7 @@ use crate::net::playback::{
     RemoteTrack,
 };
 use crate::net::session::{
-    self, ConnectOptions, LiveAuth, SessionCredentials, SessionOptions, SpotifySession,
-    StoredCredentials,
+    self, ConnectOptions, SessionCredentials, SessionOptions, SpotifySession, StoredCredentials,
 };
 use crate::store::{Kind, Store};
 
@@ -328,6 +327,8 @@ fn session_options(
 pub fn engine_kind(mock: bool, s: &config::Settings) -> EngineKind {
     if mock {
         EngineKind::Mock
+    } else if s.engine == config::AudioEngine::Native {
+        EngineKind::Native(s.bitrate.into(), s.normalisation)
     } else {
         EngineKind::Librespot(
             s.bitrate.into(),
@@ -338,22 +339,39 @@ pub fn engine_kind(mock: bool, s: &config::Settings) -> EngineKind {
 }
 
 /// Backends over the session: one identity, one client, one cache.
-fn build_source(config: &Config, session: &SpotifySession, store: &Store) -> DataSource {
-    let auth = Arc::new(LiveAuth::new(session.session.clone()));
-    let client = Arc::new(InternalClient::new(
-        http_client(),
-        auth.clone(),
+///
+/// The auth engine is [`NativeAuth`]: it signs every request with a DPoP
+/// proof, acquires its own client token, and announces the official desktop
+/// client's identity — not librespot's. See [`crate::net::native_auth`].
+fn build_source(
+    config: &Config,
+    session: &SpotifySession,
+    store: &Store,
+    secrets: Arc<dyn SecretStore>,
+) -> Result<DataSource> {
+    let http = http_client();
+    let auth = Arc::new(crate::net::native_auth::NativeAuth::new(
+        session.session.clone(),
+        secrets,
+        config.client_id.clone(),
+        http.clone(),
+    )?);
+    let client = Arc::new(InternalClient::with_dpop(
+        http,
+        auth.clone() as Arc<dyn crate::net::client::SessionAuth>,
         config.spclient_base.clone(),
         config.pathfinder_base.clone(),
         Some(store.clone()),
+        Some(auth.dpop_key()),
+        auth.nonce_state(),
     ));
     let queries = crate::net::pathfinder::Queries::load(&config.pathfinder_overrides_path());
-    DataSource::Spotify(Backend::internal(
+    Ok(DataSource::Spotify(Backend::internal(
         client,
         queries,
         Some(auth),
         Some(store.clone()),
-    ))
+    )))
 }
 
 async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T> + Send + 'static) -> Result<T> {
@@ -405,10 +423,10 @@ async fn restore_session(
     // Tokens of the old Web-API releases are useless now: remove them.
     let s = secrets.clone();
     let _ = blocking(move || s.delete(KEY_LEGACY_OAUTH)).await;
-    let Some(session) = connect_stored(secrets, opts).await? else {
+    let Some(session) = connect_stored(secrets.clone(), opts).await? else {
         return Ok(None);
     };
-    let source = build_source(&config, &session, &store);
+    let source = build_source(&config, &session, &store, secrets.clone())?;
     let user = source.me().await.ok();
     Ok(Some(SessionReady {
         source,
@@ -428,6 +446,11 @@ async fn login_flow(
 ) -> Result<SessionReady> {
     let code = oauth::wait_for_callback(listener, state, LOGIN_TIMEOUT).await?;
     let http = http_client();
+    // Load the DPoP key *before* the exchange — the authorize URL was
+    // built with its thumbprint, so the server will expect a proof made
+    // with the matching private key.
+    let s = secrets.clone();
+    let dpop_key = blocking(move || crate::net::dpop::load_or_generate(s.as_ref())).await?;
     let tokens = oauth::exchange_code(
         &http,
         &config.accounts_base,
@@ -435,14 +458,15 @@ async fn login_flow(
         &code,
         &config.redirect_uri(),
         &verifier,
+        Some(&dpop_key as &dyn oauth::DpopProver),
     )
     .await?;
     // The browser token is used once, to open the session; only the
     // session's reusable credentials are kept.
     let (session, creds) =
         session::connect(SessionCredentials::AccessToken(tokens.access_token), &opts).await?;
-    save_credentials(secrets, creds).await?;
-    let source = build_source(&config, &session, &store);
+    save_credentials(secrets.clone(), creds).await?;
+    let source = build_source(&config, &session, &store, secrets.clone())?;
     let user = source.me().await.ok();
     Ok(SessionReady {
         source,
@@ -905,6 +929,16 @@ impl App {
         let client_id = self.config.client_id.clone();
         let pkce = oauth::Pkce::generate();
         let state = oauth::random_state();
+        // Load the DPoP key (persisted in the keyring) so the authorize
+        // code is bound to it; `login_flow` later reuses the same key for
+        // the token exchange proof.
+        let dpop_jkt = match crate::net::dpop::load_or_generate(self.secrets.as_ref()) {
+            Ok(k) => Some(k.jkt().to_owned()),
+            Err(e) => {
+                tracing::warn!(error = %e, "DPoP key not available; login will be unbound");
+                None
+            }
+        };
         let url = match oauth::authorize_url(
             &self.config.accounts_base,
             &client_id,
@@ -912,6 +946,7 @@ impl App {
             &pkce.challenge,
             &state,
             config::SCOPES,
+            dpop_jkt.as_deref(),
         ) {
             Ok(u) => u,
             Err(e) => {
@@ -1728,7 +1763,13 @@ impl App {
                 self.reload_on_play = true;
                 let message = if reason.is_key_denied() {
                     self.local_denied = true;
-                    // Spotify's own player can play here: offer it.
+                    if self.settings.engine == config::AudioEngine::Builtin {
+                        // Auto-switch to the Native engine which bypasses
+                        // the AP audio-key channel.
+                        self.reload_on_play = true;
+                        self.show_toast("Audio key denied. Switching to native playback\u{2026}");
+                        return self.switch_engine(config::AudioEngine::Native);
+                    }
                     if !self.soloist_enabled() {
                         self.soloist.card = true;
                     }
@@ -3563,6 +3604,9 @@ mod tests {
         use crate::net::connect_ctl::{ClusterState, DeviceKind, RemoteDevice};
         let (mut app, mut rx, tracks) = real_app_playing();
         app.session = Some(fake_session());
+        // Start on Native so the auto-switch from Builtin doesn't fire;
+        // this tests the fallback when Native itself fails.
+        app.settings.engine = config::AudioEngine::Native;
         let _ = app.update(ui(Ui::PlayFrom(
             TrackSource::Playlist("pl01".into()),
             Some(0),
@@ -4237,6 +4281,8 @@ mod tests {
         use crate::net::audio_diag::UnavailableReason as R;
         let (mut app, _rx, _tracks) = real_app_playing();
         app.session = Some(fake_session());
+        // Start on Native so the auto-switch from Builtin doesn't fire.
+        app.settings.engine = config::AudioEngine::Native;
         let _ = app.update(ui(Ui::PlayFrom(
             TrackSource::Playlist("pl01".into()),
             Some(0),
@@ -4250,7 +4296,7 @@ mod tests {
         let _ = app.update(s(crate::auth::secrets::Secret::new("bad key")));
         let _ = app.update(ui(Ui::Soloist(soloist::SoloistUi::SaveKey)));
         assert!(app.toast.as_ref().unwrap().0.contains("API key"));
-        assert_eq!(app.settings.engine, config::AudioEngine::Builtin);
+        assert_eq!(app.settings.engine, config::AudioEngine::Native);
         // Saved: Soloist becomes the engine and the session is rebuilt.
         feed(
             &mut app,

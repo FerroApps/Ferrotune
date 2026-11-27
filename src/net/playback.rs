@@ -23,6 +23,9 @@ pub enum EngineKind {
     /// (`false` while Spotify Soloist is the local engine). A change
     /// restarts the engine.
     Librespot(BitrateKey, bool, bool),
+    /// Native HTTP-based engine (bitrate, normalisation). Uses
+    /// storage-resolve v2 / HLS instead of AP audio keys.
+    Native(BitrateKey, bool),
 }
 
 /// Hashable mirror of [`Bitrate`] for subscription identity.
@@ -182,6 +185,9 @@ pub fn events(kind: EngineKind) -> impl Stream<Item = PlaybackEvent> + Send + 's
             }
             EngineKind::Librespot(b, norm, local) => {
                 tokio::spawn(run_librespot(b, norm, local, cmd_rx, ev_tx));
+            }
+            EngineKind::Native(b, norm) => {
+                tokio::spawn(super::native::run(b, norm, cmd_rx, ev_tx));
             }
         }
         let ready =

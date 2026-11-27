@@ -68,7 +68,7 @@ impl SessionCredentials {
             Self::AccessToken(t) => Credentials::with_access_token(t.expose()),
             Self::Stored(s) => Credentials {
                 username: Some(s.username.clone()),
-                auth_type: librespot_protocol::authentication::AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
+                auth_type: spotify_proto::authentication::AuthenticationType::AUTHENTICATION_STORED_SPOTIFY_CREDENTIALS,
                 auth_data: B64
                     .decode(s.auth_data.as_bytes())
                     .map_err(|_| Error::revoked("stored Spotify credentials are corrupt"))?,
@@ -185,7 +185,7 @@ pub fn classify_login_failure(message: &str) -> Option<LoginFailure> {
     })
 }
 
-pub const PREMIUM_REQUIRED: &str = "Spotify Premium is required. Ferrotune plays audio through librespot, which only works with Premium accounts.";
+pub const PREMIUM_REQUIRED: &str = "Spotify rejected the session (the server returned \"Premium required\", which usually means the client was not recognised). Retrying with updated credentials may fix this.";
 
 fn map_connect_error(e: &librespot_core::Error, stored: bool) -> Error {
     use librespot_core::error::ErrorKind;
@@ -196,7 +196,6 @@ fn map_connect_error(e: &librespot_core::Error, stored: bool) -> Error {
         Some(LoginFailure::BadCredentials) => {
             return Error::auth("Spotify refused the login (bad credentials). Please try again.");
         }
-        // Not revoked: the stored credentials are kept.
         Some(LoginFailure::PremiumRequired) => return Error::auth(PREMIUM_REQUIRED),
         Some(LoginFailure::Transient) => {
             return Error::Net("Spotify could not complete the login right now".into());
@@ -309,11 +308,20 @@ pub async fn connect(
         // Spirc opens the session itself after registering its listeners.
         match start_connect(session.clone(), credentials.clone(), c).await {
             Ok(d) => device = Some(Arc::new(d)),
-            // A refused login would be refused again without Connect.
-            Err(e) if classify_login_failure(&e.error.to_string()).is_some() => {
-                return Err(map_connect_error(&e, stored));
-            }
             Err(e) => {
+                let failure = classify_login_failure(&e.error.to_string());
+                // "Premium required" from Connect may just mean the AP
+                // blocks third-party Connect registrations — the plain
+                // session (no Spirc device) can still work, and the DPoP
+                // credential upgrade that runs after the first token fetch
+                // may fix it for the next session.
+                let fatal = matches!(
+                    failure,
+                    Some(LoginFailure::BadCredentials | LoginFailure::Other)
+                );
+                if fatal {
+                    return Err(map_connect_error(&e, stored));
+                }
                 tracing::warn!(error = %e, "Spotify Connect unavailable; continuing without it");
                 session.shutdown();
                 session = librespot_core::Session::new(config, None);
@@ -346,14 +354,24 @@ pub async fn connect(
 
 /// [`SessionAuth`] over a live librespot session. The session can be swapped
 /// after a reconnect without rebuilding the backends.
+///
+/// Token refresh uses `spotify_protocol::Login5` (an independent HTTP client
+/// to `login5.spotify.com`), decoupled from librespot's AP channel. The
+/// librespot session is still used for spclient endpoint resolution, client
+/// tokens, and identity queries.
 pub struct LiveAuth {
     session: RwLock<librespot_core::Session>,
+    login5: spotify_protocol::Login5,
 }
 
 impl LiveAuth {
-    pub fn new(session: librespot_core::Session) -> Self {
+    pub fn new(session: librespot_core::Session, http: reqwest::Client) -> Self {
+        let client_id = session.client_id();
+        let device_id = session.device_id().to_owned();
+        let login5 = spotify_protocol::Login5::new(http, client_id, device_id, None);
         Self {
             session: RwLock::new(session),
+            login5,
         }
     }
 
@@ -378,18 +396,32 @@ impl TokenSource for LiveAuth {
             if session.is_invalid() {
                 return Err(Error::Net("the Spotify session is reconnecting".into()));
             }
-            // login5 with the session's stored credentials: the same token
-            // source librespot's spclient and dealer use.
-            let t = session
-                .login5()
-                .auth_token()
+
+            // Get the stored credential and username from the librespot
+            // session — the AP authentication blob that login5 exchanges
+            // for access tokens.
+            let auth_data = session.auth_data();
+            let username = session.username();
+
+            // Use spotify_protocol::Login5 for the token exchange instead
+            // of librespot's session.login5(), decoupling token refresh
+            // from the librespot AP channel.
+            let t = self
+                .login5
+                .auth_token(&auth_data, &username)
                 .await
                 .map_err(|e| Error::auth(format!("could not get a session token: {e}")))?;
-            let age = t.timestamp.elapsed().unwrap_or_default();
-            let left = t.expires_in.saturating_sub(age);
+
+            let left = if t.is_expired() {
+                Duration::from_secs(1)
+            } else {
+                t.expires_in
+                    .saturating_sub(t.obtained_at.elapsed())
+                    .max(Duration::from_secs(1))
+            };
             Ok(AccessToken {
-                secret: Secret::new(t.access_token),
-                expires_at: Instant::now() + left.max(Duration::from_secs(1)),
+                secret: Secret::new(t.access_token().to_owned()),
+                expires_at: Instant::now() + left,
             })
         })
     }

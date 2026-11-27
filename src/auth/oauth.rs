@@ -66,6 +66,11 @@ pub fn random_state() -> String {
 }
 
 /// Build the `/authorize` URL the user opens in a browser.
+///
+/// When `dpop_jkt` is `Some`, the resulting authorization code is bound to
+/// the DPoP key whose thumbprint this is (RFC 9449 §10). The token exchange
+/// for that code then has to present a DPoP proof made with the matching
+/// key — exactly what the official desktop client does.
 pub fn authorize_url(
     accounts_base: &str,
     client_id: &str,
@@ -73,17 +78,23 @@ pub fn authorize_url(
     challenge: &str,
     state: &str,
     scopes: &[&str],
+    dpop_jkt: Option<&str>,
 ) -> Result<String> {
     let mut url = url::Url::parse(&format!("{accounts_base}/authorize"))
         .map_err(|e| Error::auth(format!("bad accounts url: {e}")))?;
-    url.query_pairs_mut()
-        .append_pair("client_id", client_id)
-        .append_pair("response_type", "code")
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("code_challenge", challenge)
-        .append_pair("state", state)
-        .append_pair("scope", &scopes.join(" "));
+    {
+        let mut q = url.query_pairs_mut();
+        q.append_pair("client_id", client_id)
+            .append_pair("response_type", "code")
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("code_challenge_method", "S256")
+            .append_pair("code_challenge", challenge)
+            .append_pair("state", state)
+            .append_pair("scope", &scopes.join(" "));
+        if let Some(jkt) = dpop_jkt {
+            q.append_pair("dpop_jkt", jkt);
+        }
+    }
     Ok(url.to_string())
 }
 
@@ -279,40 +290,77 @@ impl TokenSet {
     }
 }
 
+/// Builder for a DPoP proof that signs this specific token exchange.
+pub trait DpopProver: Send + Sync {
+    /// Build a proof JWT for `POST <accounts_base>/api/token`, echoing the
+    /// server nonce from a previous `DPoP-Nonce` header if any.
+    fn proof(&self, htm: &str, htu: &str, nonce: Option<&str>) -> Result<String>;
+}
+
 async fn token_request(
     http: &reqwest::Client,
     accounts_base: &str,
     form: &[(&str, &str)],
+    dpop: Option<&dyn DpopProver>,
 ) -> Result<TokenSet> {
-    let resp = http
-        .post(format!("{accounts_base}/api/token"))
-        .form(form)
-        .send()
-        .await?;
-    let status = resp.status();
-    let body = resp.bytes().await?;
-    if status.is_success() {
-        let r: TokenResponse = serde_json::from_slice(&body)
-            .map_err(|_| Error::Protocol("token response was not valid JSON".into()))?;
-        return Ok(TokenSet::from_response(r, now_secs()));
+    let token_url = format!("{accounts_base}/api/token");
+    let mut nonce: Option<String> = None;
+    // The accounts server may demand a nonce; one retry is enough.
+    for attempt in 0..2 {
+        let mut rb = http.post(&token_url).form(form);
+        if let Some(p) = dpop {
+            let proof = p.proof("POST", &token_url, nonce.as_deref())?;
+            rb = rb.header("DPoP", proof);
+        }
+        let resp = rb.send().await?;
+        let status = resp.status();
+        // Grab the server-issued nonce before consuming the body.
+        if let Some(n) = resp
+            .headers()
+            .get("dpop-nonce")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from)
+        {
+            nonce = Some(n);
+        }
+        let body = resp.bytes().await?;
+        if status.is_success() {
+            let r: TokenResponse = serde_json::from_slice(&body)
+                .map_err(|_| Error::Protocol("token response was not valid JSON".into()))?;
+            return Ok(TokenSet::from_response(r, now_secs()));
+        }
+        let err: Option<TokenError> = serde_json::from_slice(&body).ok();
+        if attempt == 0
+            && dpop.is_some()
+            && nonce.is_some()
+            && err.as_ref().is_some_and(|e| e.error == "use_dpop_nonce")
+        {
+            continue;
+        }
+        return match err {
+            Some(e) => Err(Error::auth(format!(
+                "Spotify refused the login: {}{}",
+                e.error,
+                e.error_description
+                    .map(|d| format!(" ({d})"))
+                    .unwrap_or_default()
+            ))),
+            None => Err(Error::Http {
+                status: status.as_u16(),
+                message: "token endpoint error".into(),
+            }),
+        };
     }
-    let err: Option<TokenError> = serde_json::from_slice(&body).ok();
-    match err {
-        Some(e) => Err(Error::auth(format!(
-            "Spotify refused the login: {}{}",
-            e.error,
-            e.error_description
-                .map(|d| format!(" ({d})"))
-                .unwrap_or_default()
-        ))),
-        None => Err(Error::Http {
-            status: status.as_u16(),
-            message: "token endpoint error".into(),
-        }),
-    }
+    Err(Error::auth(
+        "token endpoint kept requesting a new DPoP nonce",
+    ))
 }
 
 /// Exchange the authorization code for tokens.
+///
+/// When `dpop` is `Some`, the exchange is signed with a DPoP proof. The
+/// authorization code must have been bound to the same key via the
+/// `dpop_jkt` parameter on `/authorize`.
 pub async fn exchange_code(
     http: &reqwest::Client,
     accounts_base: &str,
@@ -320,6 +368,7 @@ pub async fn exchange_code(
     code: &Secret,
     redirect_uri: &str,
     verifier: &Secret,
+    dpop: Option<&dyn DpopProver>,
 ) -> Result<TokenSet> {
     token_request(
         http,
@@ -331,6 +380,7 @@ pub async fn exchange_code(
             ("client_id", client_id),
             ("code_verifier", verifier.expose()),
         ],
+        dpop,
     )
     .await
 }
@@ -388,6 +438,7 @@ mod tests {
             "chal",
             "st",
             &["streaming", "user-library-read"],
+            None,
         )
         .unwrap();
         let parsed = url::Url::parse(&u).unwrap();
@@ -400,6 +451,27 @@ mod tests {
         assert_eq!(q["state"], "st");
         assert_eq!(q["redirect_uri"], "http://127.0.0.1:8898/login");
         assert_eq!(q["scope"], "streaming user-library-read");
+        assert!(!q.contains_key("dpop_jkt"));
+    }
+
+    #[test]
+    fn authorize_url_binds_to_dpop_key() {
+        let u = authorize_url(
+            "https://accounts.spotify.com",
+            "cid",
+            "http://127.0.0.1:8898/login",
+            "chal",
+            "st",
+            &["streaming"],
+            Some("thumbprint-123"),
+        )
+        .unwrap();
+        let q: std::collections::HashMap<_, _> = url::Url::parse(&u)
+            .unwrap()
+            .query_pairs()
+            .into_owned()
+            .collect();
+        assert_eq!(q["dpop_jkt"], "thumbprint-123");
     }
 
     #[test]
@@ -467,6 +539,7 @@ mod tests {
             "chal",
             "st",
             crate::config::SCOPES,
+            None,
         )
         .unwrap();
         let parsed = url::Url::parse(&u).unwrap();
