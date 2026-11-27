@@ -13,7 +13,7 @@
 //! 4. Exposes the DPoP key + shared nonce state the `InternalClient` uses
 //!    to sign every HTTP request with a DPoP proof JWT.
 //!
-//! The server sees: the official desktop user-agent (`Spotify/100295453
+//! The server sees: the official desktop user-agent (`Spotify/103008620
 //! Linux/0 (desktop)`), the official client id, bearer tokens, a client
 //! token, AND a DPoP proof — exactly like a real desktop client.
 //!
@@ -38,7 +38,7 @@ use crate::auth::secrets::{KEY_LIBRESPOT, Secret, SecretStore};
 use crate::error::{Error, Result};
 
 /// The client version string we announce — same as the official desktop
-/// binary (`1.2.95.453`) so the client-token server has no reason to
+/// binary (`1.3.8.620`) so the client-token server has no reason to
 /// challenge differently.
 pub const SPOTIFY_CLIENT_VERSION: &str = super::client::SPOTIFY_SEMANTIC_VERSION;
 

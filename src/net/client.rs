@@ -180,12 +180,7 @@ impl Request {
 }
 
 /// Headers the desktop client sends, byte-for-byte identical to the values
-/// the official Spotify desktop client v1.2.95.453 announces.
-///
-/// Extracted from `/share/spotify/.spotify-wrapped` by `strings` — the user-
-/// agent format is `Spotify/%d %s/%d (%s)` (build number, platform, 0,
-/// description) and the semantic version `1.2.95.453` is the one the
-/// Esperanto `DesktopVersion` proto reports.
+/// the official Spotify desktop client v1.3.8.620 announces.
 #[derive(Debug, Clone)]
 pub struct ClientHeaders {
     pub user_agent: String,
@@ -194,16 +189,13 @@ pub struct ClientHeaders {
     pub accept_language: String,
 }
 
-/// Numeric build id announced by the official Linux desktop client 1.2.95.453.
-///
-/// Computed as `major*10^8 + minor*10^5 + patch*10^3 + build`; the literal
-/// `100295453` also appears verbatim in the stripped binary's `.rodata`.
-pub const SPOTIFY_BUILD_VERSION: u64 = 100_295_453;
+/// Numeric build id announced by the official Linux desktop client 1.3.8.620.
+pub const SPOTIFY_BUILD_VERSION: u64 = 103_008_620;
 
 /// Semantic version of the official Linux desktop client we mimic.
-pub const SPOTIFY_SEMANTIC_VERSION: &str = "1.2.95.453";
+pub const SPOTIFY_SEMANTIC_VERSION: &str = "1.3.8.620";
 
-/// Property-set id for the 1.2.95.453 release (found in the binary's `.rodata`).
+/// Property-set id for the 1.3.8.620 release (found in the binary's `.rodata`).
 pub const SPOTIFY_PROPERTY_SET_ID: &str = "95e5118d3fc65ae6c2645b6f381947d38586e669";
 
 impl ClientHeaders {
@@ -630,10 +622,8 @@ mod tests {
     #[test]
     fn headers_match_official_desktop_client() {
         let h = ClientHeaders::from_environment();
-        // Numeric build id and descriptor extracted from
-        // `.spotify-wrapped` (official Spotify Linux 1.2.95.453).
         assert!(
-            h.user_agent.starts_with("Spotify/100295453 "),
+            h.user_agent.starts_with("Spotify/103008620 "),
             "{}",
             h.user_agent
         );
@@ -643,7 +633,7 @@ mod tests {
             "{}",
             h.app_platform
         );
-        assert_eq!(h.app_version, "1.2.95.453");
+        assert_eq!(h.app_version, "1.3.8.620");
         // No "librespot" substring anywhere — the whole point is to be
         // indistinguishable from the official client.
         assert!(!h.user_agent.contains("librespot"));
