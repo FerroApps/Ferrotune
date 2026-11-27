@@ -200,12 +200,16 @@ pub async fn authenticate(
     packet
         .system_info
         .mut_or_insert_default()
-        .set_system_information_string(format!("spotify_{}", version::SEMANTIC_VERSION));
+        .set_system_information_string(format!(
+            "spotify_client_{}_{}",
+            version::PLATFORM,
+            version::NUMERIC_VERSION
+        ));
     packet
         .system_info
         .mut_or_insert_default()
         .set_device_id(device_id.to_string());
-    packet.set_version_string(format!("Spotify {}", version::SEMANTIC_VERSION));
+    packet.set_version_string(version::USER_AGENT.to_string());
 
     let cmd = PacketType::Login;
     let data = packet

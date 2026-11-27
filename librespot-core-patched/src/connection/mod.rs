@@ -145,21 +145,27 @@ pub async fn authenticate(
         .mut_or_insert_default()
         .set_cpu_family(cpu_family);
     packet.system_info.mut_or_insert_default().set_os(os);
+    let platform_str = match (crate::config::OS, std::env::consts::ARCH) {
+        ("linux", "x86_64") => "linux-x86_64",
+        ("linux", "x86") => "linux-x86",
+        ("linux", "arm" | "aarch64") => "linux-arm",
+        ("macos", "x86_64") => "osx-x86_64",
+        ("macos", "aarch64") => "osx-arm64",
+        ("windows", "x86_64") => "win32-x86_64",
+        _ => "linux-x86_64",
+    };
     packet
         .system_info
         .mut_or_insert_default()
         .set_system_information_string(format!(
-            "spotify_{}",
-            version::SPOTIFY_SEMANTIC_VERSION
+            "spotify_client_{platform_str}_{}",
+            version::SPOTIFY_VERSION
         ));
     packet
         .system_info
         .mut_or_insert_default()
         .set_device_id(device_id.to_string());
-    packet.set_version_string(format!(
-        "Spotify {}",
-        version::SPOTIFY_SEMANTIC_VERSION
-    ));
+    packet.set_version_string(version::FALLBACK_USER_AGENT.to_string());
 
     let cmd = PacketType::Login;
     let data = packet.write_to_bytes()?;

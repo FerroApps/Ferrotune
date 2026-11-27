@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use protobuf::{Message, MessageField, UnknownValue};
+use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use super::client_token::solve_hash_cash;
@@ -26,7 +27,7 @@ use crate::error::{ProtocolError, Result};
 /// The official desktop client hits v4; the proto schema we have is v3 but
 /// the wire format is compatible — the server just also accepts a `flow_id`
 /// (field 4) that the v3 schema doesn't declare.
-const LOGIN5_URL: &str = "https://login5.spotify.com/v3/login";
+const LOGIN5_URL: &str = "https://login5.spotify.com/v4/login";
 
 const MAX_RETRIES: u8 = 3;
 const RETRY_DELAY: Duration = Duration::from_secs(3);
@@ -99,7 +100,7 @@ impl From<Login5Error> for ProtocolError {
 // Login5
 // ---------------------------------------------------------------------------
 
-/// Stateless Login5 client.
+/// Login5 client.
 ///
 /// Holds the HTTP client, identity, and optional DPoP key needed to exchange
 /// stored credentials for access tokens via `login5.spotify.com`.
@@ -108,6 +109,7 @@ pub struct Login5 {
     client_id: String,
     device_id: String,
     dpop_key: Option<Arc<DpopKey>>,
+    last_dpop_nonce: Mutex<Option<String>>,
 }
 
 impl Login5 {
@@ -123,6 +125,7 @@ impl Login5 {
             client_id,
             device_id,
             dpop_key,
+            last_dpop_nonce: Mutex::new(None),
         }
     }
 
@@ -259,11 +262,14 @@ impl Login5 {
             .post(LOGIN5_URL)
             .header("Accept", "application/x-protobuf")
             .header("Content-Type", "application/x-protobuf")
+            .header("User-Agent", crate::version::USER_AGENT)
             .body(body);
 
-        // Include DPoP proof if a key is available.
+        // Include DPoP proof if a key is available, echoing the last nonce.
         if let Some(ref dpop_key) = self.dpop_key {
-            let proof = dpop_key.proof("POST", LOGIN5_URL, None, None)?;
+            let last_nonce = self.last_dpop_nonce.lock().await;
+            let proof = dpop_key.proof("POST", LOGIN5_URL, None, last_nonce.as_deref())?;
+            drop(last_nonce);
             tracing::debug!("login5: including DPoP proof JWT");
             http_req = http_req.header("dpop", proof);
         }
@@ -273,10 +279,10 @@ impl Login5 {
             .await
             .map_err(|e| ProtocolError::Http(format!("login5 request: {e}")))?;
 
-        // Capture DPoP-Nonce if the server sends one (we don't persist it
-        // across requests in this stateless client, but log it for debugging).
+        // Persist the DPoP-Nonce so subsequent requests echo it back.
         if let Some(nonce) = super::dpop::extract_nonce(resp.headers()) {
-            tracing::debug!(nonce = %nonce, "login5: received DPoP-Nonce from server");
+            tracing::debug!(nonce = %nonce, "login5: persisting DPoP-Nonce");
+            *self.last_dpop_nonce.lock().await = Some(nonce);
         }
 
         let bytes = resp

@@ -241,6 +241,7 @@ async fn post_proto(
         .post(CLIENT_TOKEN_URL)
         .header("Accept", "application/x-protobuf")
         .header("Content-Type", "application/x-protobuf")
+        .header("User-Agent", crate::version::USER_AGENT)
         .body(body.to_vec())
         .send()
         .await
